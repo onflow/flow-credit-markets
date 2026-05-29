@@ -39,4 +39,9 @@ allow_host() {
 echo ">> egress firewall: allowing api.anthropic.com only"
 allow_host api.anthropic.com
 
-echo ">> egress firewall active (default-drop)"
+# Reject (not silently drop) any other egress so a blocked connection fails fast
+# instead of hanging on a timeout. The policy DROP above remains a backstop.
+iptables -A OUTPUT -p tcp -j REJECT --reject-with tcp-reset
+iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
+
+echo ">> egress firewall active (api.anthropic.com only; others rejected)"

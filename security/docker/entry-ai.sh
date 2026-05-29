@@ -12,6 +12,15 @@ if [ "${SECURITY_NO_FIREWALL:-0}" != "1" ]; then
   /usr/local/bin/init-firewall.sh
 fi
 
+# Keep Claude's traffic to the Anthropic API only. Without this, it would attempt
+# telemetry / auto-update / error-reporting calls that the egress allowlist
+# blocks, stalling the run on connection timeouts.
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export DISABLE_AUTOUPDATER=1
+export DISABLE_TELEMETRY=1
+export DISABLE_ERROR_REPORTING=1
+export DISABLE_BUG_COMMAND=1
+
 cp -a /repo/. /work/
 cd /work
 exec "$@"
