@@ -67,3 +67,8 @@ security-ai-audit:
 .PHONY: security-ai-skills
 security-ai-skills:
 	./security/run-skills.sh $(SKILL)
+
+# Summarize all reports in security/reports/ by severity (stdout only).
+.PHONY: security-ai-summarize
+security-ai-summarize:
+	./security/run-summarize.sh
