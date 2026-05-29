@@ -30,6 +30,11 @@ solidity-test:
 
 SKILL ?= solidity-auditor
 
+# Install all tools needed for the security scans (idempotent).
+.PHONY: install-tools
+install-tools:
+	./security/install-tools.sh
+
 # Run all non-AI static analyzers.
 .PHONY: security
 security: security-slither security-aderyn security-solhint
