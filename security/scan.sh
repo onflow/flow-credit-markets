@@ -43,37 +43,47 @@ static_run() {
     --entrypoint /usr/local/bin/entry-static.sh "$IMAGE" "$@"
 }
 
-# 1Password reference for the Claude Code OAuth token. This is a path, not a
-# secret, so it's safe to commit. Point it at your team's shared-vault item, or
-# override per-shell with FCM_OP_TOKEN_REF.
-DEFAULT_OP_REF="op://Shared/Claude Code OAuth Token/credential"
+# Keychain item that holds this developer's personal Claude Code OAuth token.
+KEYCHAIN_SERVICE="fcm-security-claude-token"
 
 # Resolve a credential for the AI tier WITHOUT requiring a permanent env var.
-# Precedence: an already-set env var wins (power users / CI); otherwise fetch the
-# OAuth token from 1Password at run time. Sets CRED_ENV to the variable name to
-# hand to docker — the value is passed by reference (-e NAME), never on the
-# command line, so it can't leak via `ps`.
+# The Claude Code OAuth token is PER-DEVELOPER, so it lives in each dev's own
+# store, not a shared one. Precedence (highest first):
+#   1. CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY env  (power users / CI)
+#   2. 1Password, only if FCM_OP_TOKEN_REF points at the dev's own item
+#   3. macOS Keychain  (default — set once via `make security-set-token`)
+# Sets CRED_ENV to the variable name handed to docker; the value is passed by
+# reference (-e NAME), never on the command line, so it can't leak via `ps`.
 resolve_cred() {
   if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN; return; fi
   if [ -n "${ANTHROPIC_API_KEY:-}" ];     then CRED_ENV=ANTHROPIC_API_KEY;     return; fi
 
-  local ref="${FCM_OP_TOKEN_REF:-$DEFAULT_OP_REF}"
-  if ! command -v op >/dev/null 2>&1; then
-    echo "error: 1Password CLI 'op' not found." >&2
-    echo "       Install it, or set CLAUDE_CODE_OAUTH_TOKEN in your shell for this run." >&2
-    exit 1
+  # Opt-in: 1Password, only when a reference is configured.
+  if [ -n "${FCM_OP_TOKEN_REF:-}" ]; then
+    command -v op >/dev/null 2>&1 || { echo "error: FCM_OP_TOKEN_REF is set but 'op' (1Password CLI) is not installed." >&2; exit 1; }
+    if CLAUDE_CODE_OAUTH_TOKEN="$(op read "$FCM_OP_TOKEN_REF" 2>/dev/null)" && [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+      export CLAUDE_CODE_OAUTH_TOKEN; CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN; return
+    fi
+    echo "error: could not read $FCM_OP_TOKEN_REF from 1Password." >&2; exit 1
   fi
-  if ! CLAUDE_CODE_OAUTH_TOKEN="$(op read "$ref" 2>/dev/null)" || [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-    echo "error: could not read the Claude Code OAuth token from 1Password:" >&2
-    echo "         $ref" >&2
-    echo "       One-time setup:" >&2
-    echo "         1. Run 'claude setup-token' to mint a token." >&2
-    echo "         2. Store it in 1Password at the path above (or set FCM_OP_TOKEN_REF)." >&2
-    echo "         3. Make sure 'op' is signed in (the desktop app integration is easiest)." >&2
-    exit 1
+
+  # Default: macOS Keychain (per-developer, no shared infra).
+  if command -v security >/dev/null 2>&1; then
+    if CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$USER" -w 2>/dev/null)" && [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+      export CLAUDE_CODE_OAUTH_TOKEN; CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN; return
+    fi
   fi
-  export CLAUDE_CODE_OAUTH_TOKEN
-  CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN
+
+  cat >&2 <<EOF
+error: no Claude Code credential found for the AI tier.
+  One-time setup (stores YOUR token in the macOS login Keychain, encrypted):
+    1. claude setup-token        # mint a long-lived token tied to your account
+    2. make security-set-token   # paste it once
+  Alternatives:
+    - export CLAUDE_CODE_OAUTH_TOKEN=...                          (this shell / CI)
+    - export FCM_OP_TOKEN_REF='op://<your-vault>/<item>/credential'  (1Password)
+EOF
+  exit 1
 }
 
 # NET_ADMIN is required to install the egress firewall. The scan agent's tool
@@ -95,6 +105,14 @@ AI_SKILLS_TOOLS="Skill,Task,Read,Grep,Glob,Bash(git diff:*),Bash(git status:*),B
 case "${1:-}" in
   build)
     build
+    ;;
+
+  set-token)
+    command -v security >/dev/null 2>&1 || { echo "error: macOS 'security' not found (this helper is macOS-only; use CLAUDE_CODE_OAUTH_TOKEN or FCM_OP_TOKEN_REF instead)." >&2; exit 1; }
+    echo "Mint a token with 'claude setup-token', then paste it at the prompt (input hidden)."
+    # -w with no value prompts interactively, so the token never appears in argv.
+    security add-generic-password -U -s "$KEYCHAIN_SERVICE" -a "$USER" -w
+    echo "Stored in your login Keychain (service: $KEYCHAIN_SERVICE)."
     ;;
 
   slither)
@@ -151,7 +169,7 @@ $(cat "$ROOT/security/prompts/skills-audit.md")"
     ;;
 
   *)
-    echo "usage: security/scan.sh <build|slither|aderyn|solhint|ai-review|ai-audit|ai-skills [skill]|summarize>" >&2
+    echo "usage: security/scan.sh <build|set-token|slither|aderyn|solhint|ai-review|ai-audit|ai-skills [skill]|summarize>" >&2
     exit 2
     ;;
 esac

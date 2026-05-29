@@ -35,6 +35,11 @@ SKILL ?= solidity-auditor
 security-build:
 	./security/scan.sh build
 
+# Store your Claude Code OAuth token in the macOS Keychain (one-time, per-dev).
+.PHONY: security-set-token
+security-set-token:
+	./security/scan.sh set-token
+
 # Run all non-AI static analyzers (sealed, no network).
 .PHONY: security
 security: security-slither security-aderyn security-solhint
