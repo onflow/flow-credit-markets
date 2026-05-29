@@ -14,61 +14,58 @@ solidity-test:
 	cd solidity && FOUNDRY_PROFILE=ci forge test -vvv
 
 # ---------------------------------------------------------------------------
-# Security scanning (LOCAL ONLY)
+# Security scanning (LOCAL ONLY, containerized)
 #
 # This repository is PUBLIC and the contracts hold real value. Security scans
 # are intentionally NOT run in CI — public Actions logs, issues, PR comments,
-# and artifacts would leak live vulnerabilities. Run these locally; reports go
-# to security/reports/ (gitignored) and are never committed or posted.
+# and artifacts would leak live vulnerabilities. Every scanner runs inside a
+# locked-down Docker container (see security/docker/) so untrusted analysis —
+# especially community AI skills — cannot read host files or secrets:
+#   static tier -> no network at all
+#   AI tier     -> egress restricted to the Anthropic API; needs ANTHROPIC_API_KEY
+# Reports stay in security/reports/ (gitignored) and are never committed/posted.
 #
-# Static tools require local installs:
-#   slither  -> pipx install slither-analyzer   (https://github.com/crytic/slither)
-#   aderyn   -> curl -L https://github.com/cyfrin/aderyn/releases/latest/download/aderyn-installer.sh | bash
-#   solhint  -> run via npx (no install needed)
-# AI tools require the Claude Code CLI (`claude`).
+# Requires Docker. Build the image once with `make security-build`.
 # ---------------------------------------------------------------------------
 
 SKILL ?= solidity-auditor
 
-# Install all tools needed for the security scans (idempotent).
-.PHONY: install-tools
-install-tools:
-	./security/install-tools.sh
+# Build the pinned scanner toolchain image.
+.PHONY: security-build
+security-build:
+	./security/scan.sh build
 
-# Run all non-AI static analyzers.
+# Run all non-AI static analyzers (sealed, no network).
 .PHONY: security
 security: security-slither security-aderyn security-solhint
 
 .PHONY: security-slither
 security-slither:
-	mkdir -p security/reports
-	cd solidity && slither . --config-file slither.config.json 2>&1 | tee "../security/reports/slither-report-$$(date +%Y%m%d-%H%M%S).txt"
+	./security/scan.sh slither
 
 .PHONY: security-aderyn
 security-aderyn:
-	mkdir -p security/reports
-	@stamp=$$(date +%Y%m%d-%H%M%S); aderyn solidity -o "security/reports/aderyn-report-$$stamp.md" && echo "Report: security/reports/aderyn-report-$$stamp.md"
+	./security/scan.sh aderyn
 
 .PHONY: security-solhint
 security-solhint:
-	mkdir -p security/reports
-	cd solidity && npx --yes solhint 'src/**/*.sol' 2>&1 | tee "../security/reports/solhint-report-$$(date +%Y%m%d-%H%M%S).txt"
+	./security/scan.sh solhint
 
-# AI reviews (Claude Code). Output is local + gitignored.
+# AI reviews (needs ANTHROPIC_API_KEY). Output is local + gitignored.
 .PHONY: security-ai-review
 security-ai-review:
-	./security/run-ai.sh security/prompts/review-changes.md ai-review
+	./security/scan.sh ai-review
 
 .PHONY: security-ai-audit
 security-ai-audit:
-	./security/run-ai.sh security/prompts/full-audit.md ai-audit
+	./security/scan.sh ai-audit
 
 # Skills-based audit. Override the skill: `make security-ai-skills SKILL=scv-scan`
 .PHONY: security-ai-skills
 security-ai-skills:
-	./security/run-skills.sh $(SKILL)
+	./security/scan.sh ai-skills $(SKILL)
 
 # Summarize all reports in security/reports/ by severity (stdout only).
 .PHONY: security-ai-summarize
 security-ai-summarize:
-	./security/run-summarize.sh
+	./security/scan.sh summarize
