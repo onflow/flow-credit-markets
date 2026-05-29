@@ -43,12 +43,37 @@ static_run() {
     --entrypoint /usr/local/bin/entry-static.sh "$IMAGE" "$@"
 }
 
-require_key() {
-  if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "error: the AI tier needs an API key. Set ANTHROPIC_API_KEY and re-run." >&2
-    echo "       (The static tier — slither/aderyn/solhint — needs no key.)" >&2
+# 1Password reference for the Claude Code OAuth token. This is a path, not a
+# secret, so it's safe to commit. Point it at your team's shared-vault item, or
+# override per-shell with FCM_OP_TOKEN_REF.
+DEFAULT_OP_REF="op://Shared/Claude Code OAuth Token/credential"
+
+# Resolve a credential for the AI tier WITHOUT requiring a permanent env var.
+# Precedence: an already-set env var wins (power users / CI); otherwise fetch the
+# OAuth token from 1Password at run time. Sets CRED_ENV to the variable name to
+# hand to docker — the value is passed by reference (-e NAME), never on the
+# command line, so it can't leak via `ps`.
+resolve_cred() {
+  if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN; return; fi
+  if [ -n "${ANTHROPIC_API_KEY:-}" ];     then CRED_ENV=ANTHROPIC_API_KEY;     return; fi
+
+  local ref="${FCM_OP_TOKEN_REF:-$DEFAULT_OP_REF}"
+  if ! command -v op >/dev/null 2>&1; then
+    echo "error: 1Password CLI 'op' not found." >&2
+    echo "       Install it, or set CLAUDE_CODE_OAUTH_TOKEN in your shell for this run." >&2
     exit 1
   fi
+  if ! CLAUDE_CODE_OAUTH_TOKEN="$(op read "$ref" 2>/dev/null)" || [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    echo "error: could not read the Claude Code OAuth token from 1Password:" >&2
+    echo "         $ref" >&2
+    echo "       One-time setup:" >&2
+    echo "         1. Run 'claude setup-token' to mint a token." >&2
+    echo "         2. Store it in 1Password at the path above (or set FCM_OP_TOKEN_REF)." >&2
+    echo "         3. Make sure 'op' is signed in (the desktop app integration is easiest)." >&2
+    exit 1
+  fi
+  export CLAUDE_CODE_OAUTH_TOKEN
+  CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN
 }
 
 # NET_ADMIN is required to install the egress firewall. The scan agent's tool
@@ -56,10 +81,10 @@ require_key() {
 # the firewall.
 ai_run() {
   ensure_image
-  require_key
+  resolve_cred
   docker run --rm \
     --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges \
-    -e ANTHROPIC_API_KEY \
+    -e "$CRED_ENV" \
     -v "$ROOT:/repo:ro" -v "$REPORTS:/out" \
     --entrypoint /usr/local/bin/entry-ai.sh "$IMAGE" "$@"
 }

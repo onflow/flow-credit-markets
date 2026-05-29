@@ -51,6 +51,9 @@ security-aderyn:
 security-solhint:
 	./security/scan.sh solhint
 
+.PHONY: security-ai
+security-ai: security-ai-review security-ai-audit security-ai-skills security-ai-summarize
+
 # AI reviews (needs ANTHROPIC_API_KEY). Output is local + gitignored.
 .PHONY: security-ai-review
 security-ai-review:
