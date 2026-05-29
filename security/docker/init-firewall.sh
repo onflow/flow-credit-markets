@@ -28,15 +28,17 @@ iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
 iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 
 # Allow HTTPS only to the resolved Anthropic API IPs
+# Progress messages go to stderr so they don't pollute the report (captured from
+# stdout).
 allow_host() {
   local host="$1" ip
   for ip in $(getent ahostsv4 "$host" | awk '{print $1}' | sort -u); do
     iptables -A OUTPUT -p tcp -d "$ip" --dport 443 -j ACCEPT
-    echo "  allow $host -> $ip:443"
+    echo "  allow $host -> $ip:443" >&2
   done
 }
 
-echo ">> egress firewall: allowing api.anthropic.com only"
+echo ">> egress firewall: allowing api.anthropic.com only" >&2
 allow_host api.anthropic.com
 
 # Reject (not silently drop) any other egress so a blocked connection fails fast
@@ -44,4 +46,4 @@ allow_host api.anthropic.com
 iptables -A OUTPUT -p tcp -j REJECT --reject-with tcp-reset
 iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
 
-echo ">> egress firewall active (api.anthropic.com only; others rejected)"
+echo ">> egress firewall active (api.anthropic.com only; others rejected)" >&2

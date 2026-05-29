@@ -23,4 +23,10 @@ export DISABLE_BUG_COMMAND=1
 
 cp -a /repo/. /work/
 cd /work
+
+# Heads-up on stderr (not stdout, so it stays out of the saved report). Claude in
+# headless mode prints nothing until it finishes.
+echo ">> Scan running in a sealed container. Claude produces no output until it" >&2
+echo "   finishes — this is normal and may take a couple of minutes. Please wait." >&2
+
 exec "$@"
