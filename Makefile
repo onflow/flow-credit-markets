@@ -42,17 +42,17 @@ security: security-slither security-aderyn security-solhint
 .PHONY: security-slither
 security-slither:
 	mkdir -p security/reports
-	cd solidity && slither . --config-file slither.config.json 2>&1 | tee ../security/reports/slither-report.txt
+	cd solidity && slither . --config-file slither.config.json 2>&1 | tee "../security/reports/slither-report-$$(date +%Y%m%d-%H%M%S).txt"
 
 .PHONY: security-aderyn
 security-aderyn:
 	mkdir -p security/reports
-	aderyn solidity -o security/reports/aderyn-report.md
-	@echo "Report: security/reports/aderyn-report.md"
+	@stamp=$$(date +%Y%m%d-%H%M%S); aderyn solidity -o "security/reports/aderyn-report-$$stamp.md" && echo "Report: security/reports/aderyn-report-$$stamp.md"
 
 .PHONY: security-solhint
 security-solhint:
-	cd solidity && npx --yes solhint 'src/**/*.sol'
+	mkdir -p security/reports
+	cd solidity && npx --yes solhint 'src/**/*.sol' 2>&1 | tee "../security/reports/solhint-report-$$(date +%Y%m%d-%H%M%S).txt"
 
 # AI reviews (Claude Code). Output is local + gitignored.
 .PHONY: security-ai-review
