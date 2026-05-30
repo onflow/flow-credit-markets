@@ -22,13 +22,18 @@ solidity-test:
 # locked-down Docker container (see security/docker/) so untrusted analysis —
 # especially community AI skills — cannot read host files or secrets:
 #   static tier -> no network at all
-#   AI tier     -> egress restricted to the Anthropic API; needs ANTHROPIC_API_KEY
+#   AI tier     -> egress restricted to the Anthropic API; needs a Claude
+#                  credential (see Credentials in docs/security-scanning.md)
 # Reports stay in security/reports/ (gitignored) and are never committed/posted.
 #
 # Requires Docker. Build the image once with `make security-build`.
 # ---------------------------------------------------------------------------
 
 SKILL ?= solidity-auditor
+
+# Run all security scans (local only).
+.PHONY: security
+security: security-build security-static security-ai
 
 # Build the pinned scanner toolchain image.
 .PHONY: security-build
@@ -41,8 +46,8 @@ security-set-token:
 	./security/scan.sh set-token
 
 # Run all non-AI static analyzers (sealed, no network).
-.PHONY: security
-security: security-slither security-aderyn security-solhint
+.PHONY: security-static
+security-static: security-slither security-aderyn security-solhint
 
 .PHONY: security-slither
 security-slither:
@@ -59,7 +64,7 @@ security-solhint:
 .PHONY: security-ai
 security-ai: security-ai-review security-ai-audit security-ai-skills security-ai-summarize
 
-# AI reviews (needs ANTHROPIC_API_KEY). Output is local + gitignored.
+# AI reviews (need a Claude credential — see docs). Output is local + gitignored.
 .PHONY: security-ai-review
 security-ai-review:
 	./security/scan.sh ai-review

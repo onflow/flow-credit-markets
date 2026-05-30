@@ -2,8 +2,9 @@
 #
 # Entrypoint for the AI tier. Brings up the egress allowlist (api.anthropic.com
 # only), then copies the read-only source into a writable workdir and runs the
-# requested command. The only secret in the container is ANTHROPIC_API_KEY, and
-# the only reachable network destination is the Anthropic API.
+# requested command. The only secret in the container is the Claude credential
+# (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY), and the only reachable network
+# destination is the Anthropic API.
 
 set -euo pipefail
 
