@@ -7,7 +7,7 @@
 # Tools are pinned to exact versions so a rebuild is reproducible and a poisoned
 # upstream release can't silently change what runs.
 
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
 
 # Pinned tool versions ------------------------------------------------------
 ARG SLITHER_VERSION=0.11.5
