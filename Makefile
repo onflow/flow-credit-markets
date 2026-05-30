@@ -45,6 +45,11 @@ security-build:
 security-set-token:
 	./security/scan.sh set-token
 
+# Verify a Claude credential is available (preflight for the AI tier).
+.PHONY: security-check-cred
+security-check-cred:
+	./security/scan.sh check-cred
+
 # Run all non-AI static analyzers (sealed, no network).
 .PHONY: security-static
 security-static: security-slither security-aderyn security-solhint
@@ -62,7 +67,7 @@ security-solhint:
 	./security/scan.sh solhint
 
 .PHONY: security-ai
-security-ai: security-ai-review security-ai-audit security-ai-skills security-ai-summarize
+security-ai: security-check-cred security-ai-review security-ai-audit security-ai-skills security-ai-summarize
 
 # AI reviews (need a Claude credential — see docs). Output is local + gitignored.
 .PHONY: security-ai-review

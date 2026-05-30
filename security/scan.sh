@@ -55,33 +55,51 @@ KEYCHAIN_SERVICE="fcm-security-claude-token"
 # Sets CRED_ENV to the variable name handed to docker; the value is passed by
 # reference (-e NAME), never on the command line, so it can't leak via `ps`.
 resolve_cred() {
-  if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN; return; fi
-  if [ -n "${ANTHROPIC_API_KEY:-}" ];     then CRED_ENV=ANTHROPIC_API_KEY;     return; fi
+  if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+    echo ">> credential: CLAUDE_CODE_OAUTH_TOKEN from environment" >&2
+    CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN; return
+  fi
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    echo ">> credential: ANTHROPIC_API_KEY from environment" >&2
+    CRED_ENV=ANTHROPIC_API_KEY; return
+  fi
 
   # Opt-in: 1Password, only when a reference is configured.
   if [ -n "${FCM_OP_TOKEN_REF:-}" ]; then
     command -v op >/dev/null 2>&1 || { echo "error: FCM_OP_TOKEN_REF is set but 'op' (1Password CLI) is not installed." >&2; exit 1; }
     if CLAUDE_CODE_OAUTH_TOKEN="$(op read "$FCM_OP_TOKEN_REF" 2>/dev/null)" && [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+      echo ">> credential: Claude token from 1Password ($FCM_OP_TOKEN_REF)" >&2
       export CLAUDE_CODE_OAUTH_TOKEN; CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN; return
     fi
-    echo "error: could not read $FCM_OP_TOKEN_REF from 1Password." >&2; exit 1
+    echo "error: could not read the Claude token from 1Password at: $FCM_OP_TOKEN_REF" >&2
+    echo "       Is 'op' signed in, and does the item exist at that path?" >&2
+    exit 1
   fi
 
   # Default: macOS Keychain (per-developer, no shared infra).
   if command -v security >/dev/null 2>&1; then
     if CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$USER" -w 2>/dev/null)" && [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+      echo ">> credential: Claude token from macOS Keychain" >&2
       export CLAUDE_CODE_OAUTH_TOKEN; CRED_ENV=CLAUDE_CODE_OAUTH_TOKEN; return
     fi
   fi
 
   cat >&2 <<EOF
-error: no Claude Code credential found for the AI tier.
+
+================================================================================
+  No Claude credential found — the AI scans can't run yet.
+
   One-time setup (stores YOUR token in the macOS login Keychain, encrypted):
     1. claude setup-token        # mint a long-lived token tied to your account
-    2. make security-set-token   # paste it once
-  Alternatives:
-    - export CLAUDE_CODE_OAUTH_TOKEN=...                          (this shell / CI)
+    2. make security-set-token   # paste it once when prompted
+
+  Then re-run your scan. (The static scans — make security-static — need no
+  credential and work right now.)
+
+  Alternatives instead of the Keychain:
+    - export CLAUDE_CODE_OAUTH_TOKEN=...                             (this shell / CI)
     - export FCM_OP_TOKEN_REF='op://<your-vault>/<item>/credential'  (1Password)
+================================================================================
 EOF
   exit 1
 }
@@ -90,8 +108,8 @@ EOF
 # allowlist excludes arbitrary Bash, so a poisoned skill cannot use it to alter
 # the firewall.
 ai_run() {
+  resolve_cred   # check the credential FIRST, before any (slow) image build
   ensure_image
-  resolve_cred
   docker run --rm \
     --cap-drop ALL --cap-add NET_ADMIN --security-opt no-new-privileges \
     -e "$CRED_ENV" \
@@ -105,6 +123,11 @@ AI_SKILLS_TOOLS="Skill,Task,Read,Grep,Glob,Bash(git diff:*),Bash(git status:*),B
 case "${1:-}" in
   build)
     build
+    ;;
+
+  check-cred)
+    resolve_cred
+    echo ">> Credential OK — the AI tier is ready."
     ;;
 
   set-token)
@@ -169,7 +192,7 @@ $(cat "$ROOT/security/prompts/skills-audit.md")"
     ;;
 
   *)
-    echo "usage: security/scan.sh <build|set-token|slither|aderyn|solhint|ai-review|ai-audit|ai-skills [skill]|summarize>" >&2
+    echo "usage: security/scan.sh <build|set-token|check-cred|slither|aderyn|solhint|ai-review|ai-audit|ai-skills [skill]|summarize>" >&2
     exit 2
     ;;
 esac
