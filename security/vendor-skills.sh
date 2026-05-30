@@ -57,5 +57,11 @@ mkdir -p "$dest/scv-scan"
 cp -R "$tmp/scv-scan/SKILL.md" "$tmp/scv-scan/references" "$dest/scv-scan/"
 cp -R "$tmp/auditmos/skills/"* "$dest/"
 
+# Strip any Claude settings/permission files shipped by upstream skills. We
+# control permissions via the scan's --allowedTools; a stray acceptEdits/Edit
+# settings file from a third-party repo must not live in our skills tree.
+# (Security-review finding: auditmos ships such a settings.local.json.)
+find "$dest" -name 'settings*.json' -type f -delete
+
 echo ">> Vendored skills (pinned):"
 ls -1 "$dest"
