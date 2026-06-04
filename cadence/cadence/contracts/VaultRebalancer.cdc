@@ -3,82 +3,103 @@ import "FlowToken"
 import "FungibleToken"
 import "FlowTransactionScheduler"
 
-/// VaultRebalancer — a self-rescheduling Cadence resource that invokes a single
-/// EVM function (`rebalance()`) at a fixed interval via FLIP-330
-/// `FlowTransactionScheduler`.
+/// A self-rescheduling Cadence resource that invokes a single EVM function at a
+/// fixed interval via FLIP-330 `FlowTransactionScheduler`. The target is
+/// FCMVault's `rebalance` function.
 access(all) contract VaultRebalancer {
 
-    /// Entitlement for calibration mutation.
+    /// Gates the setters for tickInterval, evmGasLimit, and executionEffort.
     access(all) entitlement Configure
 
-    /// Storage path derived from the EVM target. Storage occupancy enforces
-    /// one rebalancer per (account, target).
+    /// Deterministic path keyed only on `target`. Since storage is per-account, this
+    /// enforces one rebalancer per (account, target): a second save at the same path
+    /// aborts.
     access(all) view fun deriveRebalancerStoragePath(target: EVM.EVMAddress): StoragePath {
         return StoragePath(identifier: "vaultRebalancer_\(target.toString())")!
     }
 
-    /// Public path for the `&Rebalancer` capability used by the permissionless
-    /// `scheduleNext` entry.
+    /// Public path for the `&Rebalancer` capability, for borrowing the permissionless
+    /// `scheduleNext()`. Shares the `deriveRebalancerStoragePath` identifier so it
+    /// resolves to the saved resource. Not yet published by any setup transaction.
     access(all) view fun deriveRebalancerPublicPath(target: EVM.EVMAddress): PublicPath {
         return PublicPath(identifier: "vaultRebalancer_\(target.toString())")!
     }
 
-    /// Events
-
-    /// Emitted on each tick with the EVM call outcome.
+    /// Emitted after the EVM call, including when it reverts (a revert is reported
+    /// here, not via TickFailed). `evmStatus` is the raw EVM.Status value
+    /// (0 unknown, 1 invalid, 2 failed, 3 successful), so a Ticked event does not
+    /// imply success; `evmErrorMessage` carries the revert reason when it didn't.
     access(all) event Ticked(
         evmStatus: UInt8,
         evmErrorCode: UInt64,
+        evmErrorMessage: String,
         evmGasUsed: UInt64
     )
 
-    /// Emitted when a tick can't progress — either self-rescheduling failed, or
-    /// the EVM call couldn't be made (e.g., COA cap invalid). The loop halts
-    /// until a permissionless `scheduleNext` call restarts it.
-    /// `feeVaultBalance` is nil when the fee-provider cap can't be borrowed.
+    /// Emitted when a tick can't progress: scheduling failed (fee-provider cap
+    /// unborrowable or insufficient FLOW for the fee) or the EVM call couldn't be
+    /// made (COA cap unborrowable). The loop halts until a later `scheduleNext`
+    /// call restarts it. `feeVaultBalance` is nil when the fee-provider cap
+    /// can't be borrowed.
     access(all) event TickFailed(reason: String, feeVaultBalance: UFix64?)
 
-    /// Emitted when a tick is scheduled (initial or self-reschedule).
+    /// Emitted on the initial schedule and on each self-reschedule. `id` is the
+    /// scheduler handle for the outstanding tx; `nextTickAt` is the absolute
+    /// timestamp it fires at, not a delay; `fee` is the FLOW paid to the scheduler
+    /// for this tick.
     access(all) event Scheduled(id: UInt64, nextTickAt: UFix64, fee: UFix64)
 
-    /// Emitted on per-field calibration changes via the Configure entitlement.
+    /// One per tunable scheduling parameter, emitted by its setter
+    /// (setTickInterval, setEvmGasLimit, setExecutionEffort).
     access(all) event TickIntervalUpdated(old: UFix64, new: UFix64)
     access(all) event EvmGasLimitUpdated(old: UInt64, new: UInt64)
     access(all) event ExecutionEffortUpdated(old: UInt64, new: UInt64)
 
-    /// The Rebalancer resource. One per (account, target). Admin-owned.
+    /// Owner-held resource, one per (account, target) by storage occupancy (see
+    /// deriveRebalancerStoragePath). The owner mutates scheduling parameters via the
+    /// Configure entitlement; scheduleNext is access(all) so the tick loop can be
+    /// (re)started after it halts.
     access(all) resource Rebalancer: FlowTransactionScheduler.TransactionHandler {
 
-        /// Identity — the commitment. Immutable. Changing any of these requires
-        /// destroy + recreate (a new resource at a different deterministic path).
+        /// EVM contract the tick calls; also derives the storage path. These three
+        /// fields are immutable: changing any requires recreating the resource (a new
+        /// target lands at a new path, a calldata/priority change at the same path).
         access(all) let targetAddress: EVM.EVMAddress
+
+        /// ABI-encoded calldata sent on each tick.
         access(all) let calldata: [UInt8]
+
+        /// Scheduler priority for each scheduled tick.
         access(all) let priority: FlowTransactionScheduler.Priority
 
-        /// Capability to the COA — `auth(EVM.Call)` only.
+        /// Capability used to invoke the configured EVM call, entitled only to `EVM.Call`
+        /// so it cannot otherwise act as the account owner. If it can't be borrowed at
+        /// tick time, executeTransaction halts without rescheduling.
         access(self) let coa: Capability<auth(EVM.Call) &EVM.CadenceOwnedAccount>
 
-        /// Withdraw-entitled capability to a FlowToken vault. Caller decides where
-        /// the vault lives and how it's funded; the rebalancer just pulls FLOW
-        /// when paying scheduling fees.
+        /// Caller-owned FlowToken vault the rebalancer withdraws FLOW from to pay
+        /// scheduling fees. An invalid cap or insufficient balance halts the loop
+        /// (TickFailed, no reschedule) rather than panicking.
         access(self) let feeProvider: Capability<auth(FungibleToken.Withdraw) &FlowToken.Vault>
 
-        /// Self-capability for FlowTransactionScheduler.schedule(). Capabilities
-        /// resolve at borrow time, so the target path can be empty when this is
-        /// issued — letting us pass it into the constructor before the resource
-        /// is saved.
+        /// Capability back to this resource as the scheduler's TransactionHandler,
+        /// passed to FlowTransactionScheduler.schedule() so each tick re-enters
+        /// executeTransaction here. Resolved at borrow time, so it can be issued over
+        /// the target path before the resource is saved there.
         access(self) let selfHandler: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>
 
-        /// Calibration — mutable via the `Configure` entitlement. Each field
-        /// drifts from an independent external force (Solidity gas profile,
-        /// Cadence governance weights, scheduler contention) and is tuned
-        /// independently. New values take effect on the next `scheduleNext`;
-        /// any tick already scheduled fires with its existing parameters.
+        /// Seconds between ticks.
         access(all) var tickInterval: UFix64
+
+        /// Gas cap for the EVM call.
         access(all) var evmGasLimit: UInt64
+
+        /// Cadence execution-effort budget for the scheduled tick.
         access(all) var executionEffort: UInt64
 
-        /// Current outstanding scheduled-tx handle, if any.
+        /// Handle to the most recently scheduled tick, or nil if none has been
+        /// scheduled. Non-nil does not imply a live tick: the handle is reaped
+        /// lazily, so it may hold a finalized status (Executed/Canceled/Unknown).
         access(self) var current: @FlowTransactionScheduler.ScheduledTransaction?
 
         init(
@@ -127,26 +148,22 @@ access(all) contract VaultRebalancer {
             self.executionEffort = v
         }
 
-        /// Permissionless idempotent scheduling. Ensures a tick is scheduled.
-        /// Returns true if a new tick was scheduled; false otherwise. The two
-        /// "false" cases (already alive — no-op; or rescheduling failed) are
-        /// distinguishable via events: `TickFailed` is emitted on failure,
-        /// nothing is emitted on no-op.
+        /// Idempotent. Schedules the next tick if one isn't already Scheduled, returning
+        /// true and emitting `Scheduled`. Returns false otherwise: a still-Scheduled
+        /// tick is a silent no-op; a failed reschedule emits `TickFailed`.
         access(all) fun scheduleNext(): Bool {
-            // If we hold a scheduled-tx handle, check its status.
+            // Only reschedule once any prior handle has finalized.
             if self.current != nil {
                 let ref = (&self.current as &FlowTransactionScheduler.ScheduledTransaction?)!
                 if ref.status() == FlowTransactionScheduler.Status.Scheduled {
-                    // Already alive — no-op.
                     return false
                 }
-                // Finalized (Executed/Canceled/Unknown) — drop the stale handle.
+                // Finalized (Executed/Canceled/Unknown): drop the stale handle before rescheduling.
                 let stale <- self.current <- nil
                 destroy stale
             }
 
-            // calculateFee is the cheap path; we control the args that would make
-            // schedule() panic (handler cap, effort range, future timestamp).
+            // calculateFee is pure arithmetic over the config values and can't abort.
             let nextTime = getCurrentBlock().timestamp + self.tickInterval
             let fee = FlowTransactionScheduler.calculateFee(
                 executionEffort: self.executionEffort,
@@ -154,7 +171,7 @@ access(all) contract VaultRebalancer {
                 dataSizeMB: 0.0
             )
 
-            // Borrow the fee provider; if the capability is invalid the loop can't pay fees.
+            // Invalid fee-provider cap halts the loop without panic; resumes via a later scheduleNext().
             guard let vault = self.feeProvider.borrow() else {
                 emit TickFailed(
                     reason: "fee provider capability invalid",
@@ -172,6 +189,10 @@ access(all) contract VaultRebalancer {
             }
 
             let payment <- vault.withdraw(amount: fee) as! @FlowToken.Vault
+            // The only place scheduleNext can revert: schedule() aborts the whole tick
+            // (no TickFailed) if the scheduler rejects its inputs — out-of-range
+            // executionEffort or a nextTime not in the future (tickInterval < 1.0).
+            // Only a bad config trips this.
             let scheduled <- FlowTransactionScheduler.schedule(
                 handlerCap: self.selfHandler,
                 data: nil,
@@ -189,17 +210,18 @@ access(all) contract VaultRebalancer {
             return true
         }
 
-        /// FlowTransactionScheduler.TransactionHandler entry point. Called by the
-        /// scheduler at tick time. Performs the EVM call and self-reschedules.
-        /// Failure paths emit + return rather than panic; the loop halts and is
-        /// resumed by a permissionless `scheduleNext` call.
+        /// FlowTransactionScheduler.TransactionHandler entry point, called by the
+        /// scheduler at tick time. A reverting EVM call does not halt the loop: it
+        /// emits Ticked with the EVM status and reschedules as normal. Only an
+        /// unborrowable COA capability halts the loop with no reschedule; it resumes
+        /// via a later scheduleNext call.
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id _id: UInt64, data _data: AnyStruct?) {
             // Drop the just-executed handle regardless of outcome.
             let executed <- self.current <- nil
             destroy executed
 
-            // COA cap unborrowable: halt without rescheduling to avoid burning
-            // fees on a guaranteed-failing call. Resumes via scheduleNext().
+            // COA unborrowable: halt without rescheduling so we don't pay the next
+            // tick's fee for a call that can't run. Resumes via scheduleNext().
             guard let coaRef = self.coa.borrow() else {
                 emit TickFailed(
                     reason: "COA capability invalid",
@@ -218,6 +240,7 @@ access(all) contract VaultRebalancer {
             emit Ticked(
                 evmStatus: result.status.rawValue,
                 evmErrorCode: result.errorCode,
+                evmErrorMessage: result.errorMessage,
                 evmGasUsed: result.gasUsed
             )
 
@@ -226,11 +249,10 @@ access(all) contract VaultRebalancer {
 
     }
 
-    /// Factory: create a new Rebalancer.
-    /// Caller is expected to issue the `selfHandler` capability over the target
-    /// storage path before constructing (the path may be empty at that point —
-    /// capabilities resolve at borrow time, not at issue time). Save the
-    /// resulting resource at `deriveRebalancerStoragePath(target:)`.
+    /// Creates a Rebalancer. The caller must save the result at
+    /// `deriveRebalancerStoragePath(target:)` and issue `selfHandler` over that
+    /// same path; otherwise the resource cannot reschedule itself. The path may
+    /// be empty when the capability is issued, since it resolves at borrow time.
     access(all) fun createRebalancer(
         targetAddress: EVM.EVMAddress,
         calldata: [UInt8],

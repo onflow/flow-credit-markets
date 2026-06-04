@@ -4,18 +4,15 @@ import "FlowToken"
 import "FungibleToken"
 import "EVM"
 
-// Create and save a Rebalancer for the given EVM target. Capabilities are
-// issued against the caller-supplied paths (working or deliberately nonexistent)
-// — the tx doesn't care which.
+// Create and save a Rebalancer for the given EVM target, issuing the COA and
+// fee-provider caps over the caller-supplied coaPath / feeProviderPath.
 transaction(
     targetHex: String,
     coaPath: StoragePath,
     feeProviderPath: StoragePath
 ) {
     prepare(signer: auth(Storage, Capabilities) &Account) {
-        // Ensure a COA exists at /storage/evm so callers passing that as coaPath
-        // get a working capability. Callers wanting a broken cap pass a path
-        // where no COA is saved.
+        // Ensure a COA exists at /storage/evm so callers passing that as coaPath get a working capability.
         if signer.storage.borrow<&EVM.CadenceOwnedAccount>(from: /storage/evm) == nil {
             let coa <- EVM.createCadenceOwnedAccount()
             signer.storage.save(<-coa, to: /storage/evm)

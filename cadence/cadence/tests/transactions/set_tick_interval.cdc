@@ -1,7 +1,7 @@
 import "VaultRebalancer"
 import "EVM"
 
-// Bump the tickInterval on the rebalancer at the path derived from `targetHex`.
+// Set the tickInterval on the rebalancer at the path derived from `targetHex`.
 transaction(targetHex: String, newTickInterval: UFix64) {
     prepare(signer: auth(Storage) &Account) {
         let target = EVM.addressFromString(targetHex)

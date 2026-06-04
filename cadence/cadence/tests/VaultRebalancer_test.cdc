@@ -19,8 +19,8 @@ access(all) let mainTarget = "0x0000000000000000000000000000000000000001"
 access(all) let brokenFeeTarget = "0x0000000000000000000000000000000000000002"
 access(all) let brokenCoaTarget = "0x0000000000000000000000000000000000000003"
 
-// "nonexistent" cap paths are empty — caps issued against them return nil on
-// borrow, exercising the halt branches.
+// The nonexistent paths are empty, so caps issued against them return nil on
+// borrow; the failure tests below use them to exercise the halt branches.
 access(all) let workingCoa = /storage/evm
 access(all) let workingFeeProvider = /storage/flowTokenVault
 access(all) let nonexistentCoa = /storage/noCoaHere
@@ -56,13 +56,13 @@ access(all) fun testTickFiresAndSelfReschedules() {
     Test.assertEqual(tickedBefore + 1, Test.eventsOfType(tickedType).length)
     Test.assertEqual(scheduledBefore + 1, Test.eventsOfType(scheduledType).length)
 
-    // Empty calldata against a non-precompile address: evmErrorCode == 0.
+    // Empty calldata to the ecrecover precompile (0x...01) returns success, so evmErrorCode == 0.
     let allTicked = Test.eventsOfType(tickedType)
     let latest = allTicked[allTicked.length - 1] as! VaultRebalancer.Ticked
     Test.expect(latest.evmErrorCode, Test.equal(0 as UInt64))
 }
 
-// Loop continues — advance time again and verify another tick fires.
+// Advance time a second time; another tick must fire, showing the self-reschedule loop persists across ticks.
 access(all) fun testLoopContinues() {
     let tickedBefore = Test.eventsOfType(Type<VaultRebalancer.Ticked>()).length
     let scheduledBefore = Test.eventsOfType(Type<VaultRebalancer.Scheduled>()).length

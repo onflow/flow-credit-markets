@@ -1,6 +1,5 @@
 import Test
 
-// Build + run a tx, return the result.
 access(all) fun _executeTransaction(
     _ path: String,
     _ args: [AnyStruct],
