@@ -5,6 +5,10 @@ ci: solidity-fmt solidity-build solidity-test
 solidity-fmt:
 	cd solidity && forge fmt --check
 
+.PHONY: solidity-fmt-fix
+solidity-fmt-fix:
+	cd solidity && forge fmt
+
 .PHONY: solidity-build
 solidity-build:
 	cd solidity && FOUNDRY_PROFILE=ci forge build --sizes
