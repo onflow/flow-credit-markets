@@ -458,6 +458,100 @@ contract FCMVault is ERC4626, AccessControl {
         revert("not implemented");
     }
 
+    /// @notice Oracle-fair estimate of the shares minted for an `assets` deposit.
+    /// @dev    Mirrors `deposit`'s share math: at oracle prices the
+    ///         borrow-and-swap leg is NAV-neutral, so the depositor's NAV
+    ///         contribution equals `assets` and shares follow the standard
+    ///         ERC-4626 ratio (`super.previewDeposit`). EXCLUDES AMM price
+    ///         impact and the swap fee on the borrow→yield leg, so actual
+    ///         minted shares may be marginally lower. Reads a stale NAV (a
+    ///         `view` cannot accrue interest first as `deposit` does).
+    /// @notice Fee-inclusive estimate of the shares minted for an `assets` deposit.
+    /// @dev    Oracle-fair quote: mirrors `deposit`'s share math and subtracts the
+    ///         deterministic borrow→yield pool fee (`feeYieldDebt`).
+    ///         LIMITATION: EXCLUDES AMM price impact — not computable in a `view`
+    ///         for a Uniswap-V3-fork pool (`QuoterV2` is non-`view`) — so it may
+    ///         marginally overestimate the realized result under impact, and it
+    ///         reads a stale NAV (a view cannot accrue interest first as `deposit`
+    ///         does). Per EIP-4626 this residual is slippage, to be bounded by a
+    ///         min-out at the deposit call site, NOT by this preview (an estimate,
+    ///         not a guarantee). Rationale + prior art: docs/erc4626-previews.md.
+    function previewDeposit(uint256 assets) public view override returns (uint256) {
+        uint256 navBefore = totalAssets();
+        // Size the borrow on the would-be post-supply collateral, as `deposit`
+        // does (it supplies `assets` before borrowing; a view must simulate it).
+        uint256 toBorrow = _targetBorrowFor(assets, market.collateral() + assets);
+        // At the oracle the borrow and the yield bought with it net to zero
+        // except the pool fee paid on the borrow→yield swap. That fee is the
+        // depositor's NAV cost, so contributed = assets − feePaid (in asset units).
+        uint256 feePaid =
+            market.debtToCollateral(toBorrow.mulDiv(feeYieldDebt, SwapLib.FEE_DENOMINATOR));
+        uint256 contributed = assets > feePaid ? assets - feePaid : 0;
+        return contributed.mulDiv(_totalClaims(), navBefore + 1);
+    }
+
+    /// @notice Fee-inclusive estimate of the assets returned for redeeming `shares`.
+    /// @dev    Mirrors `_unwindSlice` at oracle prices with the pool fee applied
+    ///         to each swap leg. Sell the pro-rata yield slice for loan token,
+    ///         net of `feeYieldDebt`, giving `loanGot`; then branch on `loanGot`
+    ///         vs the pro-rata debt slice `d*`:
+    ///         - Case A (`loanGot >= d*`): pro-rata collateral plus the surplus
+    ///           `loanGot - d*` reconciled to the asset, net of `feeAssetDebt`.
+    ///         - Case B (`loanGot < d*`): collateral scaled by `loanGot / d*`.
+    ///         LIMITATION: EXCLUDES AMM *price impact* — not computable in a
+    ///         `view` for a Uniswap-V3-fork pool (`QuoterV2` is non-`view`) — so
+    ///         it may marginally overestimate the realized result under impact.
+    ///         Per EIP-4626 this residual is slippage, to be bounded by a min-out
+    ///         at the redeem call site, NOT by this preview. Rounds down, matching
+    ///         `redeem`. Rationale + prior art: docs/erc4626-previews.md.
+    function previewRedeem(uint256 shares) public view override returns (uint256) {
+        if (shares == 0) return 0;
+        uint256 claims = _totalClaims();
+
+        uint256 yieldSlice = yieldToken.balanceOf(address(this)).mulDiv(shares, claims);
+        uint256 debtSlice = market.debt().mulDiv(shares, claims);
+        uint256 collSlice = market.collateral().mulDiv(shares, claims);
+
+        // Oracle loan value of the yield slice, net of the yield/debt pool fee.
+        uint256 loanValue =
+            yieldSlice.mulDiv(IOracle(yieldOracle).price(), MarketLib.ORACLE_PRICE_SCALE);
+        uint256 loanGot =
+            loanValue.mulDiv(SwapLib.FEE_DENOMINATOR - feeYieldDebt, SwapLib.FEE_DENOMINATOR);
+
+        if (loanGot < debtSlice) {
+            // Case B: yield underperformed; collateral scaled by loanGot / d*.
+            return collSlice.mulDiv(loanGot, debtSlice);
+        }
+        // Case A: pro-rata collateral + surplus to asset, net of the asset/debt fee.
+        uint256 surplusAsset = market.debtToCollateral(loanGot - debtSlice)
+            .mulDiv(SwapLib.FEE_DENOMINATOR - feeAssetDebt, SwapLib.FEE_DENOMINATOR);
+        return collSlice + surplusAsset;
+    }
+
+    /// @notice Not implemented — `mint` is unsupported (see `mint`).
+    function previewMint(
+        uint256 /*shares*/
+    )
+        public
+        pure
+        override
+        returns (uint256)
+    {
+        revert("not implemented");
+    }
+
+    /// @notice Not implemented — `withdraw` is unsupported (see `withdraw`).
+    function previewWithdraw(
+        uint256 /*assets*/
+    )
+        public
+        pure
+        override
+        returns (uint256)
+    {
+        revert("not implemented");
+    }
+
     /// @dev How much loan token to borrow against `newAssets` while keeping
     ///      the position at `healthFactorUpperTarget`. Returns the smaller
     ///      of two caps:
@@ -477,10 +571,28 @@ contract FCMVault is ERC4626, AccessControl {
     ///      `healthFactorTarget` regardless of new asset size) is the job of
     ///      `rebalance`, not `deposit`.
     function _targetBorrowAgainst(uint256 newAssets) internal view returns (uint256) {
+        return _targetBorrowFor(newAssets, market.collateral());
+    }
+
+    /// @dev `_targetBorrowAgainst` sized against an explicit `collateralBase`
+    ///      rather than the live collateral. `deposit` supplies `assets` before
+    ///      borrowing, so it sizes against the post-supply collateral; a `view`
+    ///      preview cannot observe that, so `previewDeposit` passes
+    ///      `currentCollateral + assets` here. Behaviour is identical to the
+    ///      prior inline form: `capFromTargetDebt = maxBorrow(collateralBase) /
+    ///      target − currentDebt`, clamped to 0.
+    function _targetBorrowFor(uint256 newAssets, uint256 collateralBase)
+        internal
+        view
+        returns (uint256)
+    {
         if (newAssets == 0) return 0;
         uint256 capFromNewAsset =
             market.maxBorrowFor(newAssets).mulDiv(MarketLib.WAD, healthFactorTarget);
-        uint256 capFromTargetDebt = market.maxBorrowAtHealthFactor(healthFactorTarget);
+        uint256 targetDebt =
+            market.maxBorrowFor(collateralBase).mulDiv(MarketLib.WAD, healthFactorTarget);
+        uint256 currentDebt = market.debt();
+        uint256 capFromTargetDebt = targetDebt > currentDebt ? targetDebt - currentDebt : 0;
         return capFromNewAsset < capFromTargetDebt ? capFromNewAsset : capFromTargetDebt;
     }
 

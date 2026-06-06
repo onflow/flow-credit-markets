@@ -11,6 +11,12 @@ library SwapLib {
     ISwapRouter internal constant SWAP_ROUTER =
         ISwapRouter(0xeEDC6Ff75e1b10B903D9013c358e446a73d35341);
 
+    /// @notice Denominator for FlowSwap/Uniswap-V3 `fee` tiers (hundredths of a
+    ///         bip): a pool charges `amountIn * fee / FEE_DENOMINATOR` (e.g. a
+    ///         `fee` of 100 = 0.01%, 3000 = 0.30%). The single source of truth
+    ///         for the fee-tier scale used by callers to make quotes fee-inclusive.
+    uint256 internal constant FEE_DENOMINATOR = 1_000_000;
+
     /// @notice Swap `amountIn` of `tokenIn` for `tokenOut` with no slippage
     ///         bound. The router decides the realized price. Recipient is
     ///         always `address(this)`.

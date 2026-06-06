@@ -819,4 +819,81 @@ contract FCMVaultTest is Test {
         );
         return Math.mulDiv(maxBorrow, 1e18, debt);
     }
+
+    // ---- preview functions (issue #18) -------------------------------------
+    //
+    // Previews are fee-inclusive oracle estimates that exclude AMM price impact
+    // (see docs/erc4626-previews.md). Against the 1:1 mock swap router these
+    // assert the EIP-4626 "no more than actual" direction + fee-inclusiveness;
+    // mint/withdraw are unsupported so their previews revert.
+
+    /// @notice EIP-4626: previewDeposit MUST return no more than the shares a
+    ///         deposit mints, and be close. (The mock charges no swap fee, so
+    ///         the fee-inclusive preview sits just below actual.)
+    function test_PreviewDeposit_NoMoreThanActual() public {
+        uint256 amount = 1 ether;
+        uint256 predicted = vault.previewDeposit(amount);
+        uint256 actual = _depositFor(user, amount);
+        assertLe(predicted, actual, "preview <= actual");
+        assertApproxEqRel(predicted, actual, 1e15, "within ~0.1%");
+    }
+
+    /// @notice Fee-inclusive: strictly below the fee-free convertToShares ratio.
+    function test_PreviewDeposit_IsFeeInclusive() public view {
+        uint256 amount = 1 ether;
+        assertLt(vault.previewDeposit(amount), vault.convertToShares(amount), "fee subtracted");
+    }
+
+    /// @notice Holds on a non-empty vault too.
+    function test_PreviewDeposit_NoMoreThanActual_Subsequent() public {
+        _depositFor(user, 1 ether);
+        _allow(bob);
+        uint256 amount = 3 ether;
+        uint256 predicted = vault.previewDeposit(amount);
+        uint256 actual = _depositFor(bob, amount);
+        assertLe(predicted, actual, "preview <= actual");
+        assertApproxEqRel(predicted, actual, 1e15, "within ~0.1%");
+    }
+
+    /// @notice EIP-4626: previewRedeem MUST return no more than the assets a
+    ///         redeem returns, and be close.
+    function test_PreviewRedeem_NoMoreThanActual() public {
+        uint256 shares = _depositFor(user, 1 ether);
+        uint256 predicted = vault.previewRedeem(shares);
+        vm.prank(user);
+        uint256 actual = vault.redeem(shares, user, user);
+        assertLe(predicted, actual, "preview <= actual");
+        assertApproxEqRel(predicted, actual, 1e15, "within ~0.1%");
+    }
+
+    /// @notice Partial redeem is also conservative and close.
+    function test_PreviewRedeem_NoMoreThanActual_Partial() public {
+        uint256 shares = _depositFor(user, 2 ether);
+        uint256 half = shares / 2;
+        uint256 predicted = vault.previewRedeem(half);
+        vm.prank(user);
+        uint256 actual = vault.redeem(half, user, user);
+        assertLe(predicted, actual, "preview <= actual");
+        assertApproxEqRel(predicted, actual, 1e15, "within ~0.1%");
+    }
+
+    /// @notice Fee-inclusive: below the fee-free convertToAssets ratio.
+    function test_PreviewRedeem_IsFeeInclusive() public {
+        uint256 shares = _depositFor(user, 1 ether);
+        assertLt(vault.previewRedeem(shares), vault.convertToAssets(shares), "fee subtracted");
+    }
+
+    function test_PreviewRedeem_ZeroIsZero() public view {
+        assertEq(vault.previewRedeem(0), 0, "zero -> zero");
+    }
+
+    function test_PreviewMint_Reverts() public {
+        vm.expectRevert(bytes("not implemented"));
+        vault.previewMint(1e18);
+    }
+
+    function test_PreviewWithdraw_Reverts() public {
+        vm.expectRevert(bytes("not implemented"));
+        vault.previewWithdraw(1e18);
+    }
 }
