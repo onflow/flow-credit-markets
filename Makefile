@@ -1,5 +1,5 @@
 .PHONY: ci
-ci: solidity-fmt solidity-build solidity-test
+ci: solidity-fmt solidity-build solidity-test cadence-test
 
 .PHONY: solidity-fmt
 solidity-fmt:
@@ -12,3 +12,7 @@ solidity-build:
 .PHONY: solidity-test
 solidity-test:
 	cd solidity && FOUNDRY_PROFILE=ci forge test -vvv
+
+.PHONY: cadence-test
+cadence-test:
+	cd cadence && flow test
