@@ -13,3 +13,7 @@ access(all) fun _executeTransaction(
     )
     return Test.executeTransaction(txn)
 }
+
+access(all) fun _executeScript(_ path: String, _ args: [AnyStruct]): Test.ScriptResult {
+    return Test.executeScript(Test.readFile(path), args)
+}

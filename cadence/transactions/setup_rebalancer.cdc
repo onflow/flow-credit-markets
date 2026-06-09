@@ -9,7 +9,12 @@ import "EVM"
 transaction(
     targetHex: String,
     coaPath: StoragePath,
-    feeProviderPath: StoragePath
+    feeProviderPath: StoragePath,
+    calldata: [UInt8],
+    priority: UInt8,
+    tickInterval: UFix64,
+    evmGasLimit: UInt64,
+    executionEffort: UInt64
 ) {
     prepare(signer: auth(Storage, Capabilities) &Account) {
         // Ensure a COA exists at /storage/evm so callers passing that as coaPath get a working capability.
@@ -27,14 +32,15 @@ transaction(
 
         let rebalancer <- VaultRebalancer.createRebalancer(
             targetAddress: target,
-            calldata: [],
-            priority: FlowTransactionScheduler.Priority.Medium,
+            calldata: calldata,
+            priority: FlowTransactionScheduler.Priority(rawValue: priority)
+                ?? panic("invalid priority rawValue"),
             coa: coaCap,
             selfHandler: selfHandlerCap,
             feeProvider: feeProviderCap,
-            tickInterval: 10.0,
-            evmGasLimit: 200_000,
-            executionEffort: 5_000
+            tickInterval: tickInterval,
+            evmGasLimit: evmGasLimit,
+            executionEffort: executionEffort
         )
         signer.storage.save(<-rebalancer, to: storagePath)
     }

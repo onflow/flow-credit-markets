@@ -49,8 +49,8 @@ access(all) contract VaultRebalancer {
     /// for this tick.
     access(all) event Scheduled(id: UInt64, nextTickAt: UFix64, fee: UFix64)
 
-    /// One per tunable scheduling parameter, emitted by its setter
-    /// (setTickInterval, setEvmGasLimit, setExecutionEffort).
+    /// Emitted when tunable scheduling parameters are updated, by their
+    /// respective setters (setTickInterval, setEvmGasLimit, setExecutionEffort).
     access(all) event TickIntervalUpdated(old: UFix64, new: UFix64)
     access(all) event EvmGasLimitUpdated(old: UInt64, new: UInt64)
     access(all) event ExecutionEffortUpdated(old: UInt64, new: UInt64)
