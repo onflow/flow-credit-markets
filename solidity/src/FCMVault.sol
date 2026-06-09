@@ -90,12 +90,6 @@ contract FCMVault is ERC4626, AccessControl {
         require(p.healthFactorMin >= MarketLib.WAD, "HF min < WAD");
         require(p.healthFactorMin <= p.healthFactorTarget, "HF min > target");
         require(p.healthFactorTarget <= p.healthFactorMax, "HF target > max");
-        // Fee tiers are hundredths of a bip; >= 100% would underflow the
-        // `FEE_DENOMINATOR - fee` factor in the preview math.
-        require(
-            p.feeYieldDebt < SwapLib.FEE_DENOMINATOR && p.feeAssetDebt < SwapLib.FEE_DENOMINATOR,
-            "fee tier >= 100%"
-        );
 
         loanToken = p.loanToken;
         yieldToken = p.yieldToken;
@@ -550,7 +544,7 @@ contract FCMVault is ERC4626, AccessControl {
     }
 
     /// @dev How much loan token to borrow against `newAssets` while keeping
-    ///      the position at `healthFactorUpperTarget`. Returns the smaller
+    ///      the position at `healthFactorTarget`. Returns the smaller
     ///      of two caps:
     ///      - `capFromNewAsset`: the borrow `newAssets` of fresh collateral
     ///        could support on its own at the target HF.
