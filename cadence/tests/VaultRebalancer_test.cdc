@@ -27,7 +27,7 @@ access(all) let nonexistentCoa = /storage/noCoaHere
 access(all) let nonexistentVault = /storage/noVaultHere
 
 access(all) fun testCreateRebalancer() {
-    let res = _executeTransaction("transactions/setup_rebalancer.cdc", [mainTarget, workingCoa, workingFeeProvider], admin)
+    let res = _executeTransaction("../transactions/setup_rebalancer.cdc", [mainTarget, workingCoa, workingFeeProvider], admin)
     Test.expect(res, Test.beSucceeded())
 }
 
@@ -36,10 +36,10 @@ access(all) fun testScheduleNextAndIdempotency() {
     let scheduledType = Type<VaultRebalancer.Scheduled>()
     let before = Test.eventsOfType(scheduledType).length
 
-    Test.expect(_executeTransaction("transactions/schedule_next.cdc", [mainTarget], admin), Test.beSucceeded())
+    Test.expect(_executeTransaction("../transactions/schedule_next.cdc", [mainTarget], admin), Test.beSucceeded())
     Test.assertEqual(before + 1, Test.eventsOfType(scheduledType).length)
 
-    Test.expect(_executeTransaction("transactions/schedule_next.cdc", [mainTarget], admin), Test.beSucceeded())
+    Test.expect(_executeTransaction("../transactions/schedule_next.cdc", [mainTarget], admin), Test.beSucceeded())
     Test.assertEqual(before + 1, Test.eventsOfType(scheduledType).length)
 }
 
@@ -78,11 +78,11 @@ access(all) fun testLoopContinues() {
 access(all) fun testSetTickIntervalPersistsAndEmits() {
     let evtType = Type<VaultRebalancer.TickIntervalUpdated>()
     let before = Test.eventsOfType(evtType).length
-    Test.expect(_executeTransaction("transactions/set_tick_interval.cdc", [mainTarget, 20.0], admin), Test.beSucceeded())
+    Test.expect(_executeTransaction("../transactions/set_tick_interval.cdc", [mainTarget, 20.0], admin), Test.beSucceeded())
     Test.assertEqual(before + 1, Test.eventsOfType(evtType).length)
 
     let result = Test.executeScript(
-        Test.readFile("scripts/get_tick_interval.cdc"),
+        Test.readFile("../scripts/get_tick_interval.cdc"),
         [admin.address, mainTarget]
     )
     Test.expect(result, Test.beSucceeded())
@@ -94,8 +94,8 @@ access(all) fun testTickFailedOnInvalidFeeProvider() {
     let failedType = Type<VaultRebalancer.TickFailed>()
     let before = Test.eventsOfType(failedType).length
 
-    Test.expect(_executeTransaction("transactions/setup_rebalancer.cdc", [brokenFeeTarget, workingCoa, nonexistentVault], admin), Test.beSucceeded())
-    Test.expect(_executeTransaction("transactions/schedule_next.cdc", [brokenFeeTarget], admin), Test.beSucceeded())
+    Test.expect(_executeTransaction("../transactions/setup_rebalancer.cdc", [brokenFeeTarget, workingCoa, nonexistentVault], admin), Test.beSucceeded())
+    Test.expect(_executeTransaction("../transactions/schedule_next.cdc", [brokenFeeTarget], admin), Test.beSucceeded())
 
     let failed = Test.eventsOfType(failedType)
     Test.assertEqual(before + 1, failed.length)
@@ -110,8 +110,8 @@ access(all) fun testTickFailedOnInvalidCoa() {
     let failedType = Type<VaultRebalancer.TickFailed>()
     let before = Test.eventsOfType(failedType).length
 
-    Test.expect(_executeTransaction("transactions/setup_rebalancer.cdc", [brokenCoaTarget, nonexistentCoa, workingFeeProvider], admin), Test.beSucceeded())
-    Test.expect(_executeTransaction("transactions/schedule_next.cdc", [brokenCoaTarget], admin), Test.beSucceeded())
+    Test.expect(_executeTransaction("../transactions/setup_rebalancer.cdc", [brokenCoaTarget, nonexistentCoa, workingFeeProvider], admin), Test.beSucceeded())
+    Test.expect(_executeTransaction("../transactions/schedule_next.cdc", [brokenCoaTarget], admin), Test.beSucceeded())
 
     Test.moveTime(by: 15.0)
     Test.commitBlock()
