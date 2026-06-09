@@ -822,10 +822,9 @@ contract FCMVaultTest is Test {
 
     // ---- preview functions (issue #18) -------------------------------------
     //
-    // Previews are fee-inclusive oracle estimates that exclude AMM price impact
-    // (see docs/erc4626-previews.md). Against the 1:1 mock swap router these
-    // assert the EIP-4626 "no more than actual" direction + fee-inclusiveness;
-    // mint/withdraw are unsupported so their previews revert.
+    // Previews are fee-inclusive oracle estimates that exclude AMM price impact.
+    // Against the 1:1 mock swap router these assert the EIP-4626 "no more than
+    // actual" direction + fee-inclusiveness.
 
     /// @notice EIP-4626: previewDeposit MUST return no more than the shares a
     ///         deposit mints, and be close. (The mock charges no swap fee, so
@@ -877,6 +876,30 @@ contract FCMVaultTest is Test {
         assertApproxEqRel(predicted, actual, 1e15, "within ~0.1%");
     }
 
+    /// @notice Case B: when the yield slice's loan value (at the yield oracle,
+    ///         net of the pool fee) falls short of the pro-rata debt, the preview
+    ///         scales collateral down by `loanGot / debtSlice` instead of adding a
+    ///         surplus leg. Mirrors `test_Redeem_YieldUnderperformsScalesBothLegs`:
+    ///         the oracle marks yield down 10% and the AMM realizes the same 10%.
+    function test_PreviewRedeem_CaseB_YieldUnderperforms() public {
+        uint256 shares = _depositFor(user, 1 ether);
+
+        // Yield is now worth ~10% less in debt terms (oracle) and the AMM
+        // realizes the same shortfall (router fee), so both paths take Case B.
+        yieldOracle.setPrice((YIELD_PRICE * 9) / 10);
+        MockSwapRouter(address(SwapLib.SWAP_ROUTER)).setFeeBps(1000);
+
+        uint256 predicted = vault.previewRedeem(shares);
+        vm.prank(user);
+        uint256 actual = vault.redeem(shares, user, user);
+
+        // Payout scaled to ~90% of the deposit (no surplus leg), and the preview
+        // tracks it while staying on the conservative side.
+        assertApproxEqRel(actual, (1 ether * 9) / 10, 0.01e18, "case B scaled payout");
+        assertLe(predicted, actual, "preview <= actual");
+        assertApproxEqRel(predicted, actual, 1e15, "within ~0.1%");
+    }
+
     /// @notice Fee-inclusive: below the fee-free convertToAssets ratio.
     function test_PreviewRedeem_IsFeeInclusive() public {
         uint256 shares = _depositFor(user, 1 ether);
@@ -885,15 +908,5 @@ contract FCMVaultTest is Test {
 
     function test_PreviewRedeem_ZeroIsZero() public view {
         assertEq(vault.previewRedeem(0), 0, "zero -> zero");
-    }
-
-    function test_PreviewMint_Reverts() public {
-        vm.expectRevert(bytes("not implemented"));
-        vault.previewMint(1e18);
-    }
-
-    function test_PreviewWithdraw_Reverts() public {
-        vm.expectRevert(bytes("not implemented"));
-        vault.previewWithdraw(1e18);
     }
 }

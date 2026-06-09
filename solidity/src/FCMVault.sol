@@ -519,30 +519,6 @@ contract FCMVault is ERC4626, AccessControl {
         return collSlice + surplusAsset;
     }
 
-    /// @notice Not implemented — `mint` is unsupported (see `mint`).
-    function previewMint(
-        uint256 /*shares*/
-    )
-        public
-        pure
-        override
-        returns (uint256)
-    {
-        revert("not implemented");
-    }
-
-    /// @notice Not implemented — `withdraw` is unsupported (see `withdraw`).
-    function previewWithdraw(
-        uint256 /*assets*/
-    )
-        public
-        pure
-        override
-        returns (uint256)
-    {
-        revert("not implemented");
-    }
-
     /// @dev How much loan token to borrow against `newAssets` while keeping
     ///      the position at `healthFactorTarget`. Returns the smaller
     ///      of two caps:
