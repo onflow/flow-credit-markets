@@ -32,6 +32,10 @@ access(all) fun setup() {
     snapshot = getCurrentBlockHeight()
 }
 
+access(all) fun beforeEach() {
+    Test.reset(to: snapshot)
+}
+
 // Creates a Rebalancer for `targetHex` with the test settings hard-coded.
 access(all) fun _setupRebalancer(
     targetHex: String,
@@ -67,13 +71,11 @@ access(all) fun _setTickInterval(targetHex: String, newInterval: UFix64): Test.T
 }
 
 access(all) fun testCreateRebalancer() {
-    Test.reset(to: snapshot)
     Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
 }
 
 // First scheduleNext() schedules a tick; a second call while still scheduled is a no-op.
 access(all) fun testScheduleNextAndIdempotency() {
-    Test.reset(to: snapshot)
     Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
     let scheduledType = Type<VaultRebalancer.Scheduled>()
 
@@ -86,7 +88,6 @@ access(all) fun testScheduleNextAndIdempotency() {
 
 // Advancing time fires the tick (Ticked) and the handler re-arms itself (Scheduled).
 access(all) fun testTickFiresAndSelfReschedules() {
-    Test.reset(to: snapshot)
     Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
     Test.expect(_scheduleNext(targetHex: mainTarget), Test.beSucceeded())
 
@@ -105,7 +106,6 @@ access(all) fun testTickFiresAndSelfReschedules() {
 
 // Advance time a second time; another tick must fire, showing the self-reschedule loop persists across ticks.
 access(all) fun testLoopContinues() {
-    Test.reset(to: snapshot)
     Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
     Test.expect(_scheduleNext(targetHex: mainTarget), Test.beSucceeded())
 
@@ -120,7 +120,6 @@ access(all) fun testLoopContinues() {
 
 // setTickInterval emits TickIntervalUpdated and the new value persists.
 access(all) fun testSetTickIntervalPersistsAndEmits() {
-    Test.reset(to: snapshot)
     Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
 
     Test.expect(_setTickInterval(targetHex: mainTarget, newInterval: 20.0), Test.beSucceeded())
@@ -133,7 +132,6 @@ access(all) fun testSetTickIntervalPersistsAndEmits() {
 
 // Failure path A: broken fee-provider cap → TickFailed emitted at schedule time.
 access(all) fun testTickFailedOnInvalidFeeProvider() {
-    Test.reset(to: snapshot)
     Test.expect(_setupRebalancer(targetHex: brokenFeeTarget, coaPath: workingCoa, feeProviderPath: nonexistentVault), Test.beSucceeded())
     Test.expect(_scheduleNext(targetHex: brokenFeeTarget), Test.beSucceeded())
 
@@ -147,7 +145,6 @@ access(all) fun testTickFailedOnInvalidFeeProvider() {
 
 // Failure path B: broken COA cap → schedules fine, TickFailed emitted when tick runs.
 access(all) fun testTickFailedOnInvalidCoa() {
-    Test.reset(to: snapshot)
     Test.expect(_setupRebalancer(targetHex: brokenCoaTarget, coaPath: nonexistentCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
     Test.expect(_scheduleNext(targetHex: brokenCoaTarget), Test.beSucceeded())
 
