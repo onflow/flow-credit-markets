@@ -129,7 +129,8 @@ library MarketLib {
     function expectedDebt(MarketParams memory market) internal view returns (uint256) {
         uint256 borrowShares = uint256(MORPHO.position(market.id(), address(this)).borrowShares);
         if (borrowShares == 0) return 0;
-        (,, uint256 totalBorrowAssets, uint256 totalBorrowShares) = MORPHO.expectedMarketBalances(market);
+        (,, uint256 totalBorrowAssets, uint256 totalBorrowShares) =
+            MORPHO.expectedMarketBalances(market);
         return borrowShares.toAssetsUp(totalBorrowAssets, totalBorrowShares);
     }
 

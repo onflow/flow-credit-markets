@@ -471,9 +471,8 @@ contract FCMVault is ERC4626, AccessControl {
     ///         for a Uniswap-V3-fork pool (`QuoterV2` is non-`view`) — so it may
     ///         marginally overestimate the realized result under impact, and it
     ///         reads a stale NAV (a view cannot accrue interest first as `deposit`
-    ///         does). Per EIP-4626 this residual is slippage, to be bounded by a
-    ///         min-out at the deposit call site, NOT by this preview (an estimate,
-    ///         not a guarantee).
+    ///         does). It is an estimate, not a guarantee: slippage is bounded by a
+    ///         min-out at the deposit call site, not by this preview.
     function previewDeposit(uint256 assets) public view override returns (uint256) {
         uint256 navBefore = totalAssets();
         // Size the borrow on the would-be post-supply collateral, as `deposit`
@@ -499,8 +498,8 @@ contract FCMVault is ERC4626, AccessControl {
     ///         LIMITATION: EXCLUDES AMM *price impact* — not computable in a
     ///         `view` for a Uniswap-V3-fork pool (`QuoterV2` is non-`view`) — so
     ///         it may marginally overestimate the realized result under impact.
-    ///         Per EIP-4626 this residual is slippage, to be bounded by a min-out
-    ///         at the redeem call site, NOT by this preview. Rounds down, matching
+    ///         It is an estimate, not a guarantee: slippage is bounded by a min-out
+    ///         at the redeem call site, not by this preview. Rounds down, matching
     ///         `redeem`.
     function previewRedeem(uint256 shares) public view override returns (uint256) {
         if (shares == 0) return 0;
