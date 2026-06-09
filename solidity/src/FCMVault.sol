@@ -90,6 +90,12 @@ contract FCMVault is ERC4626, AccessControl {
         require(p.healthFactorMin >= MarketLib.WAD, "HF min < WAD");
         require(p.healthFactorMin <= p.healthFactorTarget, "HF min > target");
         require(p.healthFactorTarget <= p.healthFactorMax, "HF target > max");
+        // Fee tiers are hundredths of a bip; >= 100% would underflow the
+        // `FEE_DENOMINATOR - fee` factor in the preview math.
+        require(
+            p.feeYieldDebt < SwapLib.FEE_DENOMINATOR && p.feeAssetDebt < SwapLib.FEE_DENOMINATOR,
+            "fee tier >= 100%"
+        );
 
         loanToken = p.loanToken;
         yieldToken = p.yieldToken;
@@ -458,14 +464,6 @@ contract FCMVault is ERC4626, AccessControl {
         revert("not implemented");
     }
 
-    /// @notice Oracle-fair estimate of the shares minted for an `assets` deposit.
-    /// @dev    Mirrors `deposit`'s share math: at oracle prices the
-    ///         borrow-and-swap leg is NAV-neutral, so the depositor's NAV
-    ///         contribution equals `assets` and shares follow the standard
-    ///         ERC-4626 ratio (`super.previewDeposit`). EXCLUDES AMM price
-    ///         impact and the swap fee on the borrow→yield leg, so actual
-    ///         minted shares may be marginally lower. Reads a stale NAV (a
-    ///         `view` cannot accrue interest first as `deposit` does).
     /// @notice Fee-inclusive estimate of the shares minted for an `assets` deposit.
     /// @dev    Oracle-fair quote: mirrors `deposit`'s share math and subtracts the
     ///         deterministic borrow→yield pool fee (`feeYieldDebt`).
@@ -475,7 +473,7 @@ contract FCMVault is ERC4626, AccessControl {
     ///         reads a stale NAV (a view cannot accrue interest first as `deposit`
     ///         does). Per EIP-4626 this residual is slippage, to be bounded by a
     ///         min-out at the deposit call site, NOT by this preview (an estimate,
-    ///         not a guarantee). Rationale + prior art: docs/erc4626-previews.md.
+    ///         not a guarantee).
     function previewDeposit(uint256 assets) public view override returns (uint256) {
         uint256 navBefore = totalAssets();
         // Size the borrow on the would-be post-supply collateral, as `deposit`
@@ -503,13 +501,13 @@ contract FCMVault is ERC4626, AccessControl {
     ///         it may marginally overestimate the realized result under impact.
     ///         Per EIP-4626 this residual is slippage, to be bounded by a min-out
     ///         at the redeem call site, NOT by this preview. Rounds down, matching
-    ///         `redeem`. Rationale + prior art: docs/erc4626-previews.md.
+    ///         `redeem`.
     function previewRedeem(uint256 shares) public view override returns (uint256) {
         if (shares == 0) return 0;
         uint256 claims = _totalClaims();
 
         uint256 yieldSlice = yieldToken.balanceOf(address(this)).mulDiv(shares, claims);
-        uint256 debtSlice = market.debt().mulDiv(shares, claims);
+        uint256 debtSlice = market.expectedDebt().mulDiv(shares, claims);
         uint256 collSlice = market.collateral().mulDiv(shares, claims);
 
         // Oracle loan value of the yield slice, net of the yield/debt pool fee.

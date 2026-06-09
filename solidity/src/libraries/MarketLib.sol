@@ -6,6 +6,8 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IMorpho, MarketParams, Position, Market} from "@morpho-blue/interfaces/IMorpho.sol";
 import {IOracle} from "@morpho-blue/interfaces/IOracle.sol";
 import {MarketParamsLib} from "@morpho-blue/libraries/MarketParamsLib.sol";
+import {MorphoBalancesLib} from "@morpho-blue/libraries/periphery/MorphoBalancesLib.sol";
+import {SharesMathLib} from "@morpho-blue/libraries/SharesMathLib.sol";
 
 import {MORPHO} from "../FCMVault.sol";
 
@@ -16,11 +18,14 @@ import {MORPHO} from "../FCMVault.sol";
 ///         (1e36-scaled collateral→debt).
 ///
 ///         Callers MUST call `accrueInterest` in the same tx before reading
-///         `debt` — this lib reads `position` + `market` directly instead of
-///         going through Morpho's `expectedBorrowAssets` periphery.
+///         `debt` — it reads stored `position` + `market` directly. Read-only
+///         callers that cannot accrue (e.g. `preview*`) should use `expectedDebt`,
+///         which accrues in a `view` via Morpho's `expectedMarketBalances` periphery.
 library MarketLib {
     using Math for uint256;
     using MarketParamsLib for MarketParams;
+    using MorphoBalancesLib for IMorpho;
+    using SharesMathLib for uint256;
 
     uint256 internal constant ORACLE_PRICE_SCALE = 1e36;
     uint256 internal constant WAD = 1e18;
@@ -115,6 +120,17 @@ library MarketLib {
                 uint256(mkt.totalBorrowShares) + VIRTUAL_SHARES,
                 Math.Rounding.Ceil
             );
+    }
+
+    /// @notice This contract's debt including interest accrued to the current block,
+    /// computed in a `view` (no state mutation). Use from read-only callers
+    /// (e.g. `preview*`) that cannot `accrueInterest`; mutating paths that already
+    /// accrue should use `debt`.
+    function expectedDebt(MarketParams memory market) internal view returns (uint256) {
+        uint256 borrowShares = uint256(MORPHO.position(market.id(), address(this)).borrowShares);
+        if (borrowShares == 0) return 0;
+        (,, uint256 totalBorrowAssets, uint256 totalBorrowShares) = MORPHO.expectedMarketBalances(market);
+        return borrowShares.toAssetsUp(totalBorrowAssets, totalBorrowShares);
     }
 
     /// @notice Returns the price of 1 unit of collateral token quoted in loan token, scaled by 1e36.
