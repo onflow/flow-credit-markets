@@ -20,4 +20,12 @@ Supersede, don't delete: to revise a decision, add a new DR that flips the old o
 
 ---
 
-*No FCM content/product decisions recorded yet. The first will arrive with the top-level product spec (`001-fcm-product`). Methodology/spec-setup decisions made so far are in [`METHODOLOGY-DECISIONS.md`](./METHODOLOGY-DECISIONS.md).*
+### DR-001 — Pivot from a bespoke in-house ALP to external Morpho Blue; ice-box the ALP/MOET design   (status: accepted)
+- **Date / provenance:** pivot predates this record; current status articulated 2026-06-10 by `AlexHentschel`. Historical sources digested in [`../docs/legacy-design-digest.md`](../docs/legacy-design-digest.md).
+- **Decision:** FCM's lending layer is the **external Morpho Blue** protocol (with an ERC4626 Solidity outer vault on Flow EVM), **not** a bespoke in-house Automated Lending Protocol (ALP). The earlier full-Cadence design centered on the ALP and the **MOET** stablecoin is **ice-boxed — paused, not abandoned** (a far-future ALP-centric build remains under potential consideration). The **automated-rebalancing premise is retained** post-pivot, now applied to Morpho positions rather than a homegrown lending engine.
+- **Why:** the ALP-centric design carried too much implementation complexity (largely the in-house lending engine — see the ALP state-mutation pipeline in the digest); building on Morpho removes that burden while preserving FCM's differentiator (automation → liquidation protection + higher sustainable LTV).
+- **Scope:** [product]
+- **Alternatives rejected:** continue the full-Cadence ALP/MOET build — rejected for now on complexity/timeline grounds; may be revisited in the far future.
+- **Governing spec:** (forthcoming `001-fcm-product`); historical context in [`../docs/legacy-design-digest.md`](../docs/legacy-design-digest.md).
+
+*Methodology/spec-setup decisions are in [`METHODOLOGY-DECISIONS.md`](./METHODOLOGY-DECISIONS.md).*
