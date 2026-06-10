@@ -66,6 +66,7 @@ A lightweight lint enforces the bookkeeping: legal `status` value, a `shipped` s
 - Confirm who you are working with before acting on authority-dependent decisions.
 - Default new claims to `[unverified]`; never self-`[verified]` your own work — that's a reviewer's call (doer ≠ verifier). Back exhaustive claims ("never/always/zero") with a grep/test, not reasoning.
 - When a lesson or decision emerges, capture it structurally (a principle, a check, or a decision record) — not as prose that will be forgotten. Classify it: FCM content/product → [`DECISIONS.md`](./DECISIONS.md) (`DR-`); spec-authoring methodology → [`METHODOLOGY-DECISIONS.md`](./METHODOLOGY-DECISIONS.md) (`MD-`); if unclear, ask.
+- **To catch up after someone else's commit:** read the active spec's **§2.0 Status & Open Questions block** + its `## Changelog` first (see [`AUTHORING.md`](./AUTHORING.md) §2.0 / §13), then guide the most important next steps — **blocking** questions first. Keep that block current in the same commit as any spec change.
 
 ## References (all in-repo, versioned)
 - [`AUTHORING.md`](./AUTHORING.md) — the detailed authoring & maintenance conventions.

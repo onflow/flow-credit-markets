@@ -33,3 +33,9 @@ Supersede, don't delete: to revise, add a new MD that flips the old one's status
 - **Decision:** Two registers. **Methodology/spec-setup decisions** = `MD-` in this file. **FCM content/product decisions** = `DR-` in [`DECISIONS.md`](./DECISIONS.md). When a decision's class is genuinely ambiguous, the author asks rather than guessing.
 - **Why:** people asking about FCM project decisions mean *business/product* decisions; methodology/process choices are noise to that audience and must not pollute the content record. Clean separation keeps each register answerable to its own audience.
 - **Path to a check:** classification rule documented in [`AUTHORING.md`](./AUTHORING.md); enforced in PR review.
+
+### MD-004 — Per-spec "Status & Open Questions" block as the cold-AI catch-up entry point   (status: accepted)
+- **Date / provenance:** 2026-06-10 · `AlexHentschel`
+- **Decision:** Every `spec.md` opens with a **§2.0 Status & Open Questions block** — current state, ordered next steps, and a **per-spec** open-questions register (columns: question, raised-by, directed-to, criticality `blocking|urgent|informative`, status). It is updated **in the same commit** as any spec change; [`_INDEX.md`](./_INDEX.md) points to the active spec. Registers are **per spec**, not one repo-wide register. Defined in [`AUTHORING.md`](./AUTHORING.md) §2.0 + §13.
+- **Why:** a collaborator's cold-AI checking out someone else's commit must catch up at a high level and identify the next most important steps / blocking questions **without any out-of-repo context** (an author's local notes don't travel with the repo). This is the versioned, collaborator-facing equivalent of a working-state note.
+- **Path to a check:** convention in [`AUTHORING.md`](./AUTHORING.md) §2.0/§13, enforced in PR review; could later add a lint that a PR touching a `spec.md` also updated its §2.0 block + `## Changelog`.

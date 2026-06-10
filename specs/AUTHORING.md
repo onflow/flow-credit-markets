@@ -23,6 +23,24 @@ A lightweight lint enforces: `status` ∈ the six values above (no `done`/`compl
 
 ## 2. Spec body — the §1–6 structure (problem-first / working-backwards)
 
+### 2.0 Status & Open Questions block — the cold-AI entry point (read first / write first)
+
+Every `spec.md` **opens** with a Status & Open Questions block (immediately after the frontmatter, before §1). This is the surface a fresh reader — human or AI checking out **someone else's commit** — reads first to catch up at a high level, and the part **every spec-changing commit updates in the same commit.** It is the versioned, collaborator-facing equivalent of a working-state note (do not rely on any author's private/local notes for it). Three parts:
+
+- **Current state** — 1–3 sentences: where the spec stands and the latest significant change (the forward-looking complement to the backward-looking `## Changelog`, §8).
+- **Next steps** — the ordered, most-important actions to progress the spec (blocking items first).
+- **Open questions** — a per-spec register:
+
+  | # | Question | Raised by | Directed to | Criticality | Status |
+  | :-- | :-- | :-- | :-- | :-- | :-- |
+  | Q1 | … | @handle | @handle / role | blocking \| urgent \| informative | open (YYYY-MM-DD) / answered → outcome |
+
+  **Criticality:** **blocking** = progress cannot continue until it's answered; **urgent** = needed soon, not strictly blocking; **informative** = context / nice-to-know. When guiding next steps, surface **blocking** questions first. A question that gets answered *and yields a decision* graduates to a `DR-`/`MD-` record (§9) and is marked `answered →` here with a pointer; trivial answers just flip to `answered`.
+
+*A reader catching up should be able to read this block + the `## Changelog` and know the current state, what's next, and what's blocked — without any out-of-repo context.*
+
+### 2.1 The §1–6 content
+
 1. **Problem & why now** — what's broken/needed, why now.
 2. **Target user & outcome** — who it's for, the value/yield to them.
 3. **Definition of Done & Metrics** — what "good" is, measurably (KPIs).
@@ -120,11 +138,14 @@ This governs **every reference a spec makes to content outside this repository**
 - **In-repo references need no external link** — cite them by repo-relative path (the exception to the rules above).
 - **Inline the substance.** A content reference is corroboration/provenance, never a load-bearing dependency: a cold reader with only this repo must understand the point **without** following the link (§11).
 
-## 13. New-author bootstrap (human or AI)
+## 13. Bootstrap — catching up, or starting/extending a spec (human or AI)
 
+**Catching up on an existing spec** (e.g. after checking out someone else's commit — the cold-AI case): read the spec's **§2.0 Status & Open Questions block** and its `## Changelog` first. That's the high-level entry point — current state, ordered next steps, and blocking questions — so you can immediately guide the most important next actions (surface **blocking** questions first). [`_INDEX.md`](./_INDEX.md) points to the active spec.
+
+**Starting or extending a spec:**
 1. Read `README.md`, this file, and `constitution.md`.
-2. Create `specs/<NNN-slug>/` (next free number); copy the frontmatter (§1) and §1–6 body skeleton.
+2. Create `specs/<NNN-slug>/` (next free number); copy the frontmatter (§1), the **§2.0 Status & Open Questions block**, and the §1–6 body skeleton.
 3. Draft claims as `[unverified]`; gather evidence; promote to `[evidence-supported]` with inline references.
 4. Fill the Verification table rows (status `[unverified]`/`[evidence-supported]` — author does not self-`[verified]`).
-5. Run the cold-reader gate (§11); update [`_INDEX.md`](./_INDEX.md).
+5. Run the cold-reader gate (§11); update the spec's §2.0 block and [`_INDEX.md`](./_INDEX.md) **in the same commit**.
 6. Open a PR. A reviewer (not the author) verifies claims, fills/elevates the Verification table, and records any decision in [`DECISIONS.md`](./DECISIONS.md). High-impact changes need Approver sign-off — see [`../OWNERS.md`](../OWNERS.md).
