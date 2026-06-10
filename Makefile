@@ -68,6 +68,14 @@ mainnet-check:
 mainnet-fork-test:
 	cd solidity && FLOW_MAINNET_RPC_URL=$(FLOW_MAINNET_RPC) forge test --match-contract YieldTokenOracle -vvv
 
+# Full deployment rehearsal on an anvil fork of mainnet: seed -> deploy ->
+# live check, with state carried between steps, against real Morpho/FlowSwap/
+# Pyth contracts. Zero real funds; needs no PRIVATE_KEY. Run before any real
+# deployment. Details: solidity/script/rehearse.sh
+.PHONY: mainnet-rehearse
+mainnet-rehearse:
+	cd solidity && ./script/rehearse.sh
+
 # mainnet-deploy-rebalancer: Cadence VaultRebalancer (PR #38) deployment will
 # slot in here once that PR merges — it consumes the FCMVault address.
 
