@@ -52,6 +52,7 @@ This is the core discipline for a product where wrong claims can lose user funds
   | Claim | Status | Evidence (path:symbol / test / link) | Reviewer (GitHub) | Commit/Date |
   | :--- | :--- | :--- | :--- | :--- |
 
+- **Evidence links follow §12.** An external evidence reference needs an explicit link **and** a stable fallback (pinned commit / fileId), plus a registry entry if access-gated; in-repo evidence is cited by repo path. The cited evidence must be paraphrased enough that a cold reader grasps it without following the link.
 - **Supersession of verification.** When a spec is revised or an upstream dependency changes, demote affected `[verified]` claims back to `[unverified]` in the new version. Never inherit `verified` across a material change — re-verify.
 
 ## 4. Single source of truth for invariants
@@ -109,13 +110,15 @@ Apply the test in [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md): a fresh reader
 
 **Importing external context — inline, don't link out.** When you bring information from a source outside this repository (an external document, a chat, a tool's output, another repo) into a versioned doc, **inline the substance and remove the external pointer.** Never leave a link or path a collaborator's checkout won't contain — a reader has only the files under this repository. (Worked example: when [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md) was adopted from an external corpus, its cross-references to that corpus were stripped and replaced with in-repo ones.) A reference to something outside the repo is a cold-reader-gate failure, not a convenience.
 
-## 12. External sources — record by name, request by name
+## 12. External sources & content references — link, name, fallback, inline
 
-When a spec or repo doc draws on a document that lives **outside this repository** and may require a reader to be **granted access** (a Google Doc, a private repo, an internal wiki), record it in the versioned registry [`../docs/external-sources.md`](../docs/external-sources.md) with a **human-understood name**, its identifier/link, owner, access status, and content status.
+This governs **every reference a spec makes to content outside this repository** — not just access-gated documents, but also a **source cited for a claim**, an **evidence link in a Verification table** (§3), or **prior art** (§6). The cold-reader discipline (§11) applies to all of them:
 
-- **Why:** a reader without access — especially a fresh AI with only this repo — can't describe a source beyond a bare link. Recording the human name lets a reader **request access by name**, and lets the owner **grant it without inspecting the link**.
-- **When requesting access,** state the document's **human name and its known status** (e.g. *"the FCM Primer, which I know is partially outdated"*) so the granter has context.
-- **Still inline the substance** you rely on into the repo (§11) — the registry is for provenance/access, never a content dependency the repo can't survive without.
+- **Explicit link + stable fallback.** Give a working link AND a fallback that survives a link-resolution failure: for version-controlled sources, a **pinned-commit (immutable) URL** (plus the PR/branch page); for a Google Drive doc, the **fileId**; for a repo, the canonical repo URL. A bare branch/`HEAD` link alone is insufficient — it moves.
+- **Human-understood name.** Name the source as a human would recognize it, so a reader lacking access can **request it by name** and the owner can **grant it without inspecting the link**.
+- **Register access-gated sources.** Anything requiring a grant goes in the versioned registry [`../docs/external-sources.md`](../docs/external-sources.md) (human name, owner, access + content status). When requesting access, state the name **and** its known status (e.g. *"the FCM Primer, which I know is partially outdated"*).
+- **In-repo references need no external link** — cite them by repo-relative path (the exception to the rules above).
+- **Inline the substance.** A content reference is corroboration/provenance, never a load-bearing dependency: a cold reader with only this repo must understand the point **without** following the link (§11).
 
 ## 13. New-author bootstrap (human or AI)
 
