@@ -14,72 +14,41 @@ These are principles about *the specs themselves*, so contributors can extend th
 
 - **Self-contained / cold-readable.** Every spec and adjacent doc must be understood by a fresh reader with no access to chat history or anyone's local notes. This is non-negotiable — see the canonical standard in [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md). If a spec relies on context that isn't written down in a versioned in-repo doc, inline it or link a versioned doc.
 - **Hierarchical, with the product spec as source of truth.** The top-level product spec carries the full business case. Deeper technical sub-specs **inherit** from it and **must consult it first** — reference upward, don't restate. (Constitution Principle VII.)
-- **Tiered business coverage by altitude.** Required business depth scales with altitude (§4), never to zero for anything user- or fund-facing.
-- **Living, not frozen.** A spec changes as you learn; mark sections that iterate. Findings from implementation flow back into the spec.
+- **Tiered business coverage by altitude.** Required business depth scales with altitude (see [`AUTHORING.md`](./AUTHORING.md)), never to zero for anything user- or fund-facing.
+- **Living, not frozen.** A spec changes as you learn; mark sections that iterate. Findings from implementation flow back into the spec. Supersede, never delete — history stays auditable.
 - **Checkable, not ceremonial.** Keep it short. Bureaucracy is itself a failure mode. A one-line change doesn't need a spec.
-- **Riskiest-assumptions-first.** State what would make this wrong (an adversarial pre-mortem), cheaply, up front.
+- **Riskiest-assumptions-first.** State what would make this wrong (an adversarial pre-mortem), cheaply, up front — each assumption a hypothesis with confirm/refute signals.
+- **Claims carry evidence; doer ≠ verifier.** Load-bearing claims are tagged by evidence status and verified by someone other than the author (see [`AUTHORING.md`](./AUTHORING.md) §3). Critical for a product where a wrong claim can lose funds.
+- **Learnings are captured structurally.** A lesson becomes a constitution principle, a check, or a recorded decision in [`DECISIONS.md`](./DECISIONS.md) — never just prose.
 
 ## 3. The spec hierarchy & index
 
 ```
 specs/
-├── README.md            # this file — authoring conventions + meta
+├── README.md            # this file — orientation hub (why, principles, where things live)
+├── AUTHORING.md         # the detailed authoring & maintenance conventions
 ├── COLD-AI-PARADIGM.md  # the canonical self-containedness standard
+├── _INDEX.md            # the live index — one row per spec (status, relations)
+├── DECISIONS.md         # the decision & learnings record (provenance-tracked)
 └── <NNN-slug>/
     ├── spec.md          # the what & why (required)
     ├── plan.md          # the how (added at plan stage)
     └── tasks.md         # the evidenced checklist (added at tasks stage)
 ```
 
-**Index of specs** (keep current as specs are added):
+The live index of specs is [`_INDEX.md`](./_INDEX.md) (kept current in the same commit as any spec change). The **product spec is the root** of the hierarchy; technical sub-specs link up to it via `depends_on`.
 
-| ID | Title | Altitude | Status |
-| :--- | :--- | :--- | :--- |
-| _(001-fcm-product, forthcoming)_ | FCM top-level product spec | product | — |
+## 4. How to author or extend a spec (summary — full detail in `AUTHORING.md`)
 
-The **product spec is the root** of the hierarchy; technical sub-specs link up to it.
+The complete conventions live in [`AUTHORING.md`](./AUTHORING.md). In brief:
 
-## 4. How to author or extend a spec
+- **Tooling (optional):** the `dapper-spec-kit` Claude Code plugin provides guided `/dapper-spec-kit:speckit-*` commands (specify, plan, tasks, clarify, analyze). You can also author by hand — the tooling is an aid, not a requirement.
+- **Each `spec.md`** has required frontmatter (`spec_id`, `title`, `status`, `owner`, `created`, `updated`, `constitution`; plus `supersedes`/`superseded_by`/`depends_on` relations) and a problem-first body: **§1 Problem · §2 Target user & outcome · §3 Definition of Done & Metrics · §4 Non-goals · §5 Riskiest Assumptions & Tests · §6 Prior Art**. Annotate `[USER]` / `[AGENT→VALIDATE]` / `⟳`.
+- **Business coverage is tiered by altitude** (Principle VII): product spec = full business case; technical sub-specs = lighter, and consult the product spec first.
+- **Claims carry evidence:** tag load-bearing claims `[unverified]`/`[evidence-supported]`/`[verified]`, back them with inline references, and record verification (by a non-author) in each spec's `## Verification` table. "Never/always/zero" claims must cite a mechanical check.
+- **Before merging:** run the cold-reader gate ([`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md)) and update [`_INDEX.md`](./_INDEX.md).
 
-**Recommended tooling:** the `dapper-spec-kit` Claude Code plugin provides guided commands — `/dapper-spec-kit:speckit-specify` (spec), `…speckit-plan`, `…speckit-tasks`, `…speckit-clarify`, `…speckit-analyze`. You can also author by hand following the conventions below; the tooling is an aid, not a requirement.
-
-**Frontmatter (required on every `spec.md`):**
-
-```yaml
----
-spec_id: NNN-slug          # MUST equal the directory name, e.g. 001-fcm-product
-title: <one line>
-status: draft              # draft | planned | in-dev | blocked | shipped | superseded
-owner: <name or github handle>
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
-constitution: ../../constitution.md
-# superseded_by: NNN-slug  # required ONLY if status: superseded
----
-```
-
-Rules a lightweight lint enforces (so keep them true): `status` must be one of the six values above (no `done`/`complete`); a `shipped` spec has zero open `[ ]` tasks in its `tasks.md`; a `superseded` spec names its replacement via `superseded_by`; `spec_id` equals the directory slug; spec references resolve to a real `specs/<id>/`.
-
-**Body — use this section structure** (a Working-Backwards / problem-first shape):
-
-1. **Problem & why now** — what's broken/needed, and why now.
-2. **Target user & outcome** — who it's for and the value/yield to them.
-3. **Definition of Done & Metrics** — what "good" is, measurably (KPIs).
-4. **Non-goals** — what this explicitly does *not* cover.
-5. **Riskiest Assumptions & Tests** — the adversarial pre-mortem: what would make this wrong, and how we'd find out.
-6. **Prior Art & Build-vs-Buy** — what exists, what we reuse vs build.
-
-Annotate where useful: `[USER]` = needs a human decision; `[AGENT→VALIDATE]` = AI drafts, then verify; `⟳` = section iterates over time.
-
-**Business-coverage tier by altitude** (Constitution Principle VII):
-
-| Altitude | Required business coverage |
-| :--- | :--- |
-| **Product** (top-level) | FULL: target users, value prop, market sizing, competitive framing, revenue model, KPIs, business risks/tradeoffs, status. |
-| **Mid technical** | LIGHT: a few lines — KPIs moved, user value, risks/tradeoffs to escalate, status. **Consult the product spec first**; reference up, don't duplicate. |
-| **Deep technical** | Encouraged, not gated — but still consult the product spec for already-captured context. |
-
-**Before you call a spec done:** run the cold-AI test from [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md) — could a fresh reader, with no other context, decode every term, understand its purpose, and place it in its lifecycle? If not, add what's missing.
+A lightweight lint enforces the bookkeeping: legal `status` value, a `shipped` spec has zero open `[ ]` tasks, `superseded` names `superseded_by`, `spec_id` equals the directory slug, and references resolve.
 
 ## 5. Governance touchpoints (don't skip)
 
@@ -94,9 +63,14 @@ Annotate where useful: `[USER]` = needs a human decision; `[AGENT→VALIDATE]` =
 - Never propose overriding a constitution principle; if one creates friction, first find a way to satisfy it (see Governance).
 - For changes with wide product impact, ask whether the product lead (see [`../OWNERS.md`](../OWNERS.md)) should be consulted.
 - Confirm who you are working with before acting on authority-dependent decisions.
+- Default new claims to `[unverified]`; never self-`[verified]` your own work — that's a reviewer's call (doer ≠ verifier). Back exhaustive claims ("never/always/zero") with a grep/test, not reasoning.
+- When a lesson emerges, capture it structurally (a principle, a check, or a [`DECISIONS.md`](./DECISIONS.md) entry) — not as prose that will be forgotten.
 
 ## References (all in-repo, versioned)
+- [`AUTHORING.md`](./AUTHORING.md) — the detailed authoring & maintenance conventions.
+- [`_INDEX.md`](./_INDEX.md) — the live spec index (status + relations).
+- [`DECISIONS.md`](./DECISIONS.md) — the decision & learnings record.
+- [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md) — the self-containedness standard.
 - [`../constitution.md`](../constitution.md) — durable principles + governance.
 - [`../OWNERS.md`](../OWNERS.md) — roles, the Approver binding, high-impact definition.
-- [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md) — the self-containedness standard.
 - [`../docs/architecture.md`](../docs/architecture.md), [`../docs/vault-rebalancer.md`](../docs/vault-rebalancer.md), [`../README.md`](../README.md) — what FCM is.
