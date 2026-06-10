@@ -12,7 +12,7 @@ or doc in this repo."
 # The Cold-AI Paradigm — Writing Persisted Content for a Future Self With No Memory
 
 **Authored:** 2026-06-09, by an AI persona in conversation with a senior human collaborator.
-**Status:** established discipline (settled, not hypothesis-shaped). Consolidates material previously scattered across `writes-thinks-speaks.md`, `10-ADAPTIVE-MEMORY-STRUCTURE.md § 5–6`, and `11-MULTI-PROJECT-BOOTSTRAP.md § 6.5`.
+**Status:** established discipline (settled, not hypothesis-shaped). Adopted into flow-credit-markets as the canonical authoring standard for specs and adjacent docs.
 **Audience:** a cold AI in a fresh session with no access to the originating workspace and no other context. Self-contained on purpose. If you are that reader, this document is both the explanation of the paradigm and a worked example of it.
 
 ---
@@ -209,16 +209,15 @@ This document must pass its own test. A cold AI reading it with no other context
 - **Decode** — every term (cold AI, the four-question test, the writes/thinks/speaks modes, hypothesis-test directive, persisted trigger, unfalsifiable habit) is grounded inline.
 - **Understand purpose** — it explains the cold-AI paradigm and serves as a write-time gate for everything persisted to memory.
 - **Recognise signals** — the gate has been applied when persisted content survives the four questions; it has failed when any question is unanswerable from the text alone.
-- **Place in lifecycle** — established discipline, authored 2026-06-09, consolidating three predecessor files; settled (not hypothesis-shaped); applicable to any AI persona with persistent cross-session memory.
+- **Place in lifecycle** — established discipline, authored 2026-06-09; settled (not hypothesis-shaped); applicable to any AI persona with persistent cross-session memory, and to any contributor (human or AI) authoring a versioned doc in this repo.
 
 If this document ever degrades to where a cold AI cannot apply the test it describes, the discipline has failed on its own author.
 
 ---
 
-## Cross-references
+## Cross-references (in this repo)
 
-- `writes-thinks-speaks.md` — the three communication modes; cold AI as the consumer of the writes mode.
-- `10-ADAPTIVE-MEMORY-STRUCTURE.md § 5–6` — the cold-AI test for hypothesis-test directives; the recursive principle; persisted-trigger forms.
-- `11-MULTI-PROJECT-BOOTSTRAP.md § 6.5` — the four-question test as a bootstrap acceptance gate.
-- `01-MEMORY-SYSTEM.md` — the persistence infrastructure the paradigm protects.
-- `03-SELF-IMPROVEMENT.md § Directives Are Hypotheses` — the foundational treatment of directives-as-hypotheses that `§ 6` builds on.
+- [`README.md`](./README.md) — how this standard applies when authoring or extending an FCM spec (the §1–6 body format, business-coverage tiers, the spec hierarchy).
+- [`../constitution.md`](../constitution.md) — the durable principles; Principle VII requires specs to be self-contained and tiered.
+
+*(This document was adapted from a general AI-memory authoring discipline; any references to that external corpus have been removed so this file stands alone within the repository.)*
