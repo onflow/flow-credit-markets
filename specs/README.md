@@ -19,7 +19,7 @@ These are principles about *the specs themselves*, so contributors can extend th
 - **Checkable, not ceremonial.** Keep it short. Bureaucracy is itself a failure mode. A one-line change doesn't need a spec.
 - **Riskiest-assumptions-first.** State what would make this wrong (an adversarial pre-mortem), cheaply, up front — each assumption a hypothesis with confirm/refute signals.
 - **Claims carry evidence; doer ≠ verifier.** Load-bearing claims are tagged by evidence status and verified by someone other than the author (see [`AUTHORING.md`](./AUTHORING.md) §3). Critical for a product where a wrong claim can lose funds.
-- **Learnings are captured structurally.** A lesson becomes a constitution principle, a check, or a recorded decision in [`DECISIONS.md`](./DECISIONS.md) — never just prose.
+- **Learnings & decisions are captured structurally, and classified.** A lesson becomes a constitution principle, a check, or a recorded decision — never just prose. Decisions split by audience: **FCM content/product** decisions go in [`DECISIONS.md`](./DECISIONS.md) (`DR-`); decisions about **the spec-authoring methodology itself** go in [`METHODOLOGY-DECISIONS.md`](./METHODOLOGY-DECISIONS.md) (`MD-`). If a decision's class is unclear, ask.
 
 ## 3. The spec hierarchy & index
 
@@ -29,7 +29,8 @@ specs/
 ├── AUTHORING.md         # the detailed authoring & maintenance conventions
 ├── COLD-AI-PARADIGM.md  # the canonical self-containedness standard
 ├── _INDEX.md            # the live index — one row per spec (status, relations)
-├── DECISIONS.md         # the decision & learnings record (provenance-tracked)
+├── DECISIONS.md         # FCM content/product decisions (DR-) — "what was decided for FCM"
+├── METHODOLOGY-DECISIONS.md # decisions about the spec-authoring methodology itself (MD-)
 └── <NNN-slug>/
     ├── spec.md          # the what & why (required)
     ├── plan.md          # the how (added at plan stage)
@@ -64,12 +65,13 @@ A lightweight lint enforces the bookkeeping: legal `status` value, a `shipped` s
 - For changes with wide product impact, ask whether the product lead (see [`../OWNERS.md`](../OWNERS.md)) should be consulted.
 - Confirm who you are working with before acting on authority-dependent decisions.
 - Default new claims to `[unverified]`; never self-`[verified]` your own work — that's a reviewer's call (doer ≠ verifier). Back exhaustive claims ("never/always/zero") with a grep/test, not reasoning.
-- When a lesson emerges, capture it structurally (a principle, a check, or a [`DECISIONS.md`](./DECISIONS.md) entry) — not as prose that will be forgotten.
+- When a lesson or decision emerges, capture it structurally (a principle, a check, or a decision record) — not as prose that will be forgotten. Classify it: FCM content/product → [`DECISIONS.md`](./DECISIONS.md) (`DR-`); spec-authoring methodology → [`METHODOLOGY-DECISIONS.md`](./METHODOLOGY-DECISIONS.md) (`MD-`); if unclear, ask.
 
 ## References (all in-repo, versioned)
 - [`AUTHORING.md`](./AUTHORING.md) — the detailed authoring & maintenance conventions.
 - [`_INDEX.md`](./_INDEX.md) — the live spec index (status + relations).
-- [`DECISIONS.md`](./DECISIONS.md) — the decision & learnings record.
+- [`DECISIONS.md`](./DECISIONS.md) — FCM content/product decisions (`DR-`).
+- [`METHODOLOGY-DECISIONS.md`](./METHODOLOGY-DECISIONS.md) — decisions about the spec-authoring methodology (`MD-`).
 - [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md) — the self-containedness standard.
 - [`../constitution.md`](../constitution.md) — durable principles + governance.
 - [`../OWNERS.md`](../OWNERS.md) — roles, the Approver binding, high-impact definition.

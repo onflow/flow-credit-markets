@@ -82,9 +82,16 @@ Each task is `[ ]` until done, then `[x]` with a one-line evidence pointer (comm
 - **Tier caution.** `constitution.md` > these `specs/` conventions > an individual spec. Changing a higher tier needs stronger justification (constitution edits require a version bump + rationale per its Governance).
 - **Keep [`_INDEX.md`](./_INDEX.md) current** — every new/changed spec updates its row in the same commit.
 
-## 9. Capturing learnings — structural, not prose
+## 9. Capturing decisions & learnings — structural, and correctly classified
 
-A lesson is only "captured" when it lands as **a constitution principle, a checklist/PR-template item, or a CI/test/lint check** — never as a buried paragraph (prose rules get satisfied syntactically and violated semantically). If a lesson genuinely can't yet be made into a check, record it in [`DECISIONS.md`](./DECISIONS.md) with provenance (date, PR/commit, and the principle that failed or was missing) — and revisit whether it can become a check later. On any fix, ask **"which existing rule should have caught this?"** and fix that rule, not just the symptom.
+A lesson is only "captured" when it lands as **a constitution principle, a checklist/PR-template item, or a CI/test/lint check** — never as a buried paragraph (prose rules get satisfied syntactically and violated semantically). If a decision or lesson can't (yet) be a check, record it — in the **correct register**, because the two classes serve different audiences:
+
+- **Content / product decisions** — FCM business and product calls (target users, fees, which markets, risk/return tradeoffs, …). → [`DECISIONS.md`](./DECISIONS.md), prefixed **`DR-`**. This is what a stakeholder means by "what was decided for FCM." Keep this record clean.
+- **Methodology / spec-setup decisions** — how we author, evidence, govern, and maintain specs (the process itself). → [`METHODOLOGY-DECISIONS.md`](./METHODOLOGY-DECISIONS.md), prefixed **`MD-`**.
+
+**Classification rule:** ask *"is this a decision about the FCM product/business (→ DR), or about the spec-authoring methodology (→ MD)?"* Methodology noise must never pollute the content record. **If the class is genuinely unclear, ask a maintainer rather than guessing.**
+
+On any fix, ask **"which existing rule should have caught this?"** and fix that rule, not just the symptom.
 
 ## 10. Writing rules (for editing the constitution or these conventions)
 
@@ -99,6 +106,8 @@ Mark unproven rules `(experimental)`. Keep hard `must/never` prescriptions a min
 ## 11. Before you merge — the cold-reader gate
 
 Apply the test in [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md): a fresh reader, with only this repository (no chat, no Slack, no author's local notes), must be able to **decode** every term, **understand** the purpose, **recognise** what evidence matters, and **place** the doc in its lifecycle. If any fails, inline what's missing. No versioned doc may reference anything outside this repo.
+
+**Importing external context — inline, don't link out.** When you bring information from a source outside this repository (an external document, a chat, a tool's output, another repo) into a versioned doc, **inline the substance and remove the external pointer.** Never leave a link or path a collaborator's checkout won't contain — a reader has only the files under this repository. (Worked example: when [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md) was adopted from an external corpus, its cross-references to that corpus were stripped and replaced with in-repo ones.) A reference to something outside the repo is a cold-reader-gate failure, not a convenience.
 
 ## 12. New-author bootstrap (human or AI)
 
