@@ -55,6 +55,13 @@
 
 ---
 
+## Source 6 — FCM Protocol Product Roadmap (April 23, 2026 — legacy)  (HISTORICAL CONTEXT; MoSCoW outdated)
+- **Origin:** Google Doc "FCM Protocol Product Roadmap (Latest April 23)" (owner Jeff Doyle, product; Dete, protocol). Access-gated — see [`external-sources.md`](./external-sources.md) (category B).
+- **What it is:** the ALP-era product roadmap, framed as a four-stage **trust progression** — v0.1 → **v0.2 Rebuild** → **vMillions** → v1.0 — gated by commitments (TVL / audit / dogfooding), not calendar dates. ALP-centric: lending on the bespoke Cadence ALP; **Flow Yield Vaults (FYV)** wrap single **strategies** (FUSDEV USD-yield; Flow Looping leverage); **MOET** + FlowActions decoupled/excluded.
+- **Endures (terminology/concepts that carry into the current design):** health factor / LTV, looping / leverage, FUSDEV (supply-to-Morpho USD yield), spread + volatility **circuit breakers**, multi-oracle resilience (now Pyth), scheduled rebalancing (legacy "AutoBalancer" → the Cadence rebalancer), **warmup** period, **dust** management, **escape hatch**, and the **v0.2 / vMillions** milestone names + the trust-progression / gate philosophy.
+- **Stale:** the bespoke Cadence **ALP** (→ external Morpho Blue), **MOET**, the in-house oracle aggregator/router specifics, and the **item-by-item MoSCoW prioritization** — superseded by the current "FCM Product (MoSCoW breakdown)" ([`FCM-Product-MoSCoW.md`](./FCM-Product-MoSCoW.md)).
+- **Disclaimer:** *Legacy April-23 roadmap (ALP-centric, MoSCoW outdated); retained for terminology/concept context. Defer to the current MoSCoW for prioritization.*
+
 ## How to use this digest (staleness, case by case)
 - **Product premises** (the "endures" lists, Source 5 vision) are safe to cite for the business case — but **quantitative claims are unverified and ALP-model-specific**, so caveat them.
 - **Oracle / numeraire / health-trigger principles** (Sources 1–3) are safe to cite as *requirements/patterns*, but their **implementations must be re-derived for Solidity/EVM + Pyth + Morpho** — never cite the Cadence specifics as current.

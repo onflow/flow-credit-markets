@@ -79,4 +79,5 @@ A lightweight lint enforces the bookkeeping: legal `status` value, a `shipped` s
 - [`../docs/architecture.md`](../docs/architecture.md), [`../docs/vault-rebalancer.md`](../docs/vault-rebalancer.md), [`../README.md`](../README.md) — what FCM is.
 - [`../docs/legacy-design-digest.md`](../docs/legacy-design-digest.md) — staleness-aware digest of the prior (ice-boxed) ALP-era design.
 - [`../docs/onsight-april-2026-digest.md`](../docs/onsight-april-2026-digest.md) — digest of the April '26 Consumer Finance Onsight (the current design's basis).
+- [`../docs/FCM-Product-MoSCoW.md`](../docs/FCM-Product-MoSCoW.md) — in-repo copy of the central product PRD / MoSCoW (check the original for newer versions).
 - [`../docs/external-sources.md`](../docs/external-sources.md) — registry of external sources (with human names + access status) the specs draw on.
