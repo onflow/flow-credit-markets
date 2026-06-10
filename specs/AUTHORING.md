@@ -137,6 +137,7 @@ This governs **every reference a spec makes to content outside this repository**
 - **Register access-gated sources.** Anything requiring a grant goes in the versioned registry [`../docs/external-sources.md`](../docs/external-sources.md) (human name, owner, access + content status). When requesting access, state the name **and** its known status (e.g. *"the FCM Primer, which I know is partially outdated"*).
 - **In-repo references need no external link** — cite them by repo-relative path (the exception to the rules above).
 - **Inline the substance.** A content reference is corroboration/provenance, never a load-bearing dependency: a cold reader with only this repo must understand the point **without** following the link (§11).
+- **This repo is PUBLIC — keep versioned content public-appropriate.** Sensitive business detail (revenue/token/fee specifics, candid internal risk/people commentary, competitive or vendor intel) is **not** committed; it lives in an **access-gated source referenced by name** (the registry, category A). When you digest a gated source, **state what was omitted and that it's retrievable from the original** — don't silently drop it. (Methodology decision `MD-005`.)
 
 ## 13. Bootstrap — catching up, or starting/extending a spec (human or AI)
 
