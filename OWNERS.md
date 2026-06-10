@@ -8,11 +8,13 @@
 | :--- | :--- | :--- |
 | Alex Hentschel | `AlexHentschel` | Advisor — technical, leadership, product. Not a code contributor. **Approver.** |
 | Patrick Fuchs | `holyfuchs` | Product lead & technical lead. **Approver.** |
+| Dete | _(handle TBD)_ | CTO of Dapper & Flow; FCM's originating protocol designer/innovator (the legacy ALP variant and the newer product designs); DeFi/blockchain innovator. Core advisor & stakeholder on product + business strategy. Product role transitioning to Patrick for the execution phase. |
+| Roham | _(handle TBD)_ | COO of Dapper & Flow; advisor & close collaborator on business + high-level product strategy. **Ultimate approver & stakeholder for all major business decisions.** |
 | Tim Barry | `tim-barry` | Engineer. |
 | Jordan Ribbink | `jribbink` | Engineer. |
 | Jordan Schalm | `jordanschalm` | Engineer (temporary, as of 2026-06-09). |
 
-**Roham** is the CEO / business owner FCM ultimately reports up to; the constitution's "explainable to Roham" bar means a decision's rationale must stand at the business-strategy level, not just the engineering level.
+**Two approval axes, kept distinct.** The constitution's **Approver** role (below) gates high-impact *spec/code* changes and is satisfied by **Patrick Fuchs or Alex Hentschel**. **Major *business* decisions ultimately gate on Roham (COO)** — the constitution's "explainable to Roham" bar means a decision's rationale must stand at the business-strategy level, not just the engineering level. **Dete (CTO)** is FCM's originating protocol designer and a core product/strategy stakeholder; the day-to-day product role is transitioning from Dete to Patrick for the execution phase.
 
 *Name disambiguation:* a bare "Patrick" means **Patrick Fuchs** (`holyfuchs`) — not to be confused with **Patrick Permutter** ("Patrick P"), a different person in the broader team. A bare "Jordan" is ambiguous (Ribbink vs Schalm) — disambiguate as "Jordan R" / "Jordan S".
 
