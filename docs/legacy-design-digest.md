@@ -63,3 +63,5 @@
 
 ## Provenance & how to re-check the originals
 The legacy specs live in the **external** public repo `onflow/flow-credit-markets-old` (price-oracle on `main`; Numeraire, Health-Trigger-Manager, and ALP-architecture on the open PRs noted above). The Primer is an internal Google Doc owned by asher.farooq@flowfoundation.org. These are **external to this repository and may move or change** — this digest inlines their substance so it stands alone. When consulting an original later, **check the PR's status and read the newest version from the PR branch (or `main` if merged).** As of 2026-06-10 the three PRs were all open.
+
+For each source's **human-understood name, owner, and access status** (use these when *requesting access* to a source you can't reach), see the registry [`./external-sources.md`](./external-sources.md).

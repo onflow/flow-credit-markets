@@ -76,3 +76,5 @@ A lightweight lint enforces the bookkeeping: legal `status` value, a `shipped` s
 - [`../constitution.md`](../constitution.md) — durable principles + governance.
 - [`../OWNERS.md`](../OWNERS.md) — roles, the Approver binding, high-impact definition.
 - [`../docs/architecture.md`](../docs/architecture.md), [`../docs/vault-rebalancer.md`](../docs/vault-rebalancer.md), [`../README.md`](../README.md) — what FCM is.
+- [`../docs/legacy-design-digest.md`](../docs/legacy-design-digest.md) — staleness-aware digest of the prior (ice-boxed) ALP-era design.
+- [`../docs/external-sources.md`](../docs/external-sources.md) — registry of external sources (with human names + access status) the specs draw on.

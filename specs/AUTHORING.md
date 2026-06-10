@@ -109,7 +109,15 @@ Apply the test in [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md): a fresh reader
 
 **Importing external context — inline, don't link out.** When you bring information from a source outside this repository (an external document, a chat, a tool's output, another repo) into a versioned doc, **inline the substance and remove the external pointer.** Never leave a link or path a collaborator's checkout won't contain — a reader has only the files under this repository. (Worked example: when [`COLD-AI-PARADIGM.md`](./COLD-AI-PARADIGM.md) was adopted from an external corpus, its cross-references to that corpus were stripped and replaced with in-repo ones.) A reference to something outside the repo is a cold-reader-gate failure, not a convenience.
 
-## 12. New-author bootstrap (human or AI)
+## 12. External sources — record by name, request by name
+
+When a spec or repo doc draws on a document that lives **outside this repository** and may require a reader to be **granted access** (a Google Doc, a private repo, an internal wiki), record it in the versioned registry [`../docs/external-sources.md`](../docs/external-sources.md) with a **human-understood name**, its identifier/link, owner, access status, and content status.
+
+- **Why:** a reader without access — especially a fresh AI with only this repo — can't describe a source beyond a bare link. Recording the human name lets a reader **request access by name**, and lets the owner **grant it without inspecting the link**.
+- **When requesting access,** state the document's **human name and its known status** (e.g. *"the FCM Primer, which I know is partially outdated"*) so the granter has context.
+- **Still inline the substance** you rely on into the repo (§11) — the registry is for provenance/access, never a content dependency the repo can't survive without.
+
+## 13. New-author bootstrap (human or AI)
 
 1. Read `README.md`, this file, and `constitution.md`.
 2. Create `specs/<NNN-slug>/` (next free number); copy the frontmatter (§1) and §1–6 body skeleton.
