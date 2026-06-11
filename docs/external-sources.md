@@ -38,3 +38,7 @@ Sources are grouped by **current applicability**: (A) sources that largely apply
 | **FCM Protocol Product Roadmap (legacy version from April 23)** | [Google Doc](https://docs.google.com/document/d/1XX6OtE7kSmMrfieA9RKV3AB-BZWjuVmOWWxClRa3yMo) · fileId `1XX6OtE7kSmMrfieA9RKV3AB-BZWjuVmOWWxClRa3yMo` | jeffrey.doyle@flowfoundation.org | **Needs grant** (Google Drive) — request as *"the FCM Protocol Product Roadmap (legacy version from April 23)"* | **Legacy** — ALP-era, MoSCoW outdated; retained for terminology/concept context | [`./legacy-design-digest.md`](./legacy-design-digest.md) Source 6 |
 
 *Guideline: when a spec begins drawing on a new external document that might require access, add a row here under the right category with its human name, owner, and status. A source can graduate from B to A (or be demoted) as the design evolves. For GitHub PR sources, check the PR's status and read the newest version from the PR branch (or `main` if merged).*
+
+## Private store (access-gated home for sensitive spec detail)
+
+Per `MD-005` (public specs, access-gated sensitive detail), FCM's own sensitive spec content lives in the **`FCM Top-Level Product Spec` gDrive folder** ([Drive folder](https://drive.google.com/drive/folders/1bYguJ38iJa-tyFG_iJ7ypgqle0YxQETh)), inside the shared `Flow Team` google drive under the `FCM` folder. It is access-gated (request access as part of the FCM gDrive). Its `_INDEX` lists what it holds and how it is organized; public specs/docs keep the public-appropriate summary and reference the gated detail there by name.

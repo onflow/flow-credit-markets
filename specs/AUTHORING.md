@@ -138,6 +138,7 @@ This governs **every reference a spec makes to content outside this repository**
 - **In-repo references need no external link** — cite them by repo-relative path (the exception to the rules above).
 - **Inline the substance.** A content reference is corroboration/provenance, never a load-bearing dependency: a cold reader with only this repo must understand the point **without** following the link (§11).
 - **This repo is PUBLIC — keep versioned content public-appropriate.** Sensitive business detail (revenue/token/fee specifics, candid internal risk/people commentary, competitive or vendor intel) is **not** committed; it lives in an **access-gated source referenced by name** (the registry, category A). When you digest a gated source, **state what was omitted and that it's retrievable from the original** — don't silently drop it. (Methodology decision `MD-005`.)
+- **The designated private store** for FCM's own sensitive spec detail is the **`FCM Top-Level Product Spec` gDrive folder** (see [`../docs/external-sources.md`](../docs/external-sources.md), "Private store"). Structure it cold-AI-style: an index points to detail, one purpose per doc, and each doc records provenance (source + date) and staleness, so the gated detail stays findable by a fresh reader.
 
 ## 13. Bootstrap — catching up, or starting/extending a spec (human or AI)
 
