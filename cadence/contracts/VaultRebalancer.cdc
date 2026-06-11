@@ -26,7 +26,7 @@ access(all) contract VaultRebalancer {
     }
 
     /// Emitted after the EVM call, including when it reverts (a revert is reported
-    /// here, not via TickFailed). `evmStatus` is the raw EVM.Status value
+    /// here). `evmStatus` is the raw EVM.Status value
     /// (0 unknown, 1 invalid, 2 failed, 3 successful), so a Ticked event does not
     /// imply success; `evmErrorMessage` carries the revert reason when it didn't.
     access(all) event Ticked(
@@ -35,13 +35,6 @@ access(all) contract VaultRebalancer {
         evmErrorMessage: String,
         evmGasUsed: UInt64
     )
-
-    /// Emitted when a tick can't progress: scheduling failed (fee-provider cap
-    /// unborrowable or insufficient FLOW for the fee) or the EVM call couldn't be
-    /// made (COA cap unborrowable). The loop halts until a later `scheduleNext`
-    /// call restarts it. `feeVaultBalance` is nil when the fee-provider cap
-    /// can't be borrowed.
-    access(all) event TickFailed(reason: String, feeVaultBalance: UFix64?)
 
     /// Emitted on the initial schedule and on each self-reschedule. `id` is the
     /// scheduler handle for the outstanding tx; `nextTickAt` is the absolute
@@ -74,12 +67,12 @@ access(all) contract VaultRebalancer {
 
         /// Capability used to invoke the configured EVM call, entitled only to `EVM.Call`
         /// so it cannot otherwise act as the account owner. If it can't be borrowed at
-        /// tick time, executeTransaction halts without rescheduling.
+        /// tick time, the tick reverts; the loop halts until restarted via scheduleNext.
         access(self) let coa: Capability<auth(EVM.Call) &EVM.CadenceOwnedAccount>
 
         /// Caller-owned FlowToken vault the rebalancer withdraws FLOW from to pay
-        /// scheduling fees. An invalid cap or insufficient balance halts the loop
-        /// (TickFailed, no reschedule) rather than panicking.
+        /// scheduling fees. An invalid cap or insufficient balance reverts the tick;
+        /// the loop halts until restarted via scheduleNext.
         access(self) let feeProvider: Capability<auth(FungibleToken.Withdraw) &FlowToken.Vault>
 
         /// Capability back to this resource as the scheduler's TransactionHandler,
@@ -148,15 +141,15 @@ access(all) contract VaultRebalancer {
             self.executionEffort = v
         }
 
-        /// Idempotent. Schedules the next tick if one isn't already Scheduled, returning
-        /// true and emitting `Scheduled`. Returns false otherwise: a still-Scheduled
-        /// tick is a silent no-op; a failed reschedule emits `TickFailed`.
-        access(all) fun scheduleNext(): Bool {
+        /// Idempotent. Schedules the next tick and emits `Scheduled` unless one is already
+        /// scheduled (a no-op). A reschedule failure reverts the tick and halts the loop,
+        /// surfaced only as a missing `Ticked`; restartable via a later scheduleNext.
+        access(all) fun scheduleNext() {
             // Only reschedule once any prior handle has finalized.
             if self.current != nil {
                 let ref = (&self.current as &FlowTransactionScheduler.ScheduledTransaction?)!
                 if ref.status() == FlowTransactionScheduler.Status.Scheduled {
-                    return false
+                    return
                 }
                 // Finalized (Executed/Canceled/Unknown): drop the stale handle before rescheduling.
                 let stale <- self.current <- nil
@@ -171,28 +164,10 @@ access(all) contract VaultRebalancer {
                 dataSizeMB: 0.0
             )
 
-            // Invalid fee-provider cap halts the loop without panic; resumes via a later scheduleNext().
-            guard let vault = self.feeProvider.borrow() else {
-                emit TickFailed(
-                    reason: "fee provider capability invalid",
-                    feeVaultBalance: nil
-                )
-                return false
-            }
-
-            if vault.balance < fee {
-                emit TickFailed(
-                    reason: "insufficient FLOW (need \(fee))",
-                    feeVaultBalance: vault.balance
-                )
-                return false
-            }
-
+            // From here any failure reverts the whole tick (unborrowable fee cap, low
+            // FLOW, storage-min, bad schedule config), surfaced only as a missing Ticked.
+            let vault = self.feeProvider.borrow() ?? panic("fee provider capability unborrowable")
             let payment <- vault.withdraw(amount: fee) as! @FlowToken.Vault
-            // The only place scheduleNext can revert: schedule() aborts the whole tick
-            // (no TickFailed) if the scheduler rejects its inputs — out-of-range
-            // executionEffort or a nextTime not in the future (tickInterval < 1.0).
-            // Only a bad config trips this.
             let scheduled <- FlowTransactionScheduler.schedule(
                 handlerCap: self.selfHandler,
                 data: nil,
@@ -207,28 +182,20 @@ access(all) contract VaultRebalancer {
             destroy stale
 
             emit Scheduled(id: scheduledId, nextTickAt: nextTime, fee: fee)
-            return true
         }
 
         /// FlowTransactionScheduler.TransactionHandler entry point, called by the
-        /// scheduler at tick time. A reverting EVM call does not halt the loop: it
-        /// emits Ticked with the EVM status and reschedules as normal. Only an
-        /// unborrowable COA capability halts the loop with no reschedule; it resumes
-        /// via a later scheduleNext call.
+        /// scheduler at tick time. A reverting EVM call does NOT halt the loop: it
+        /// emits Ticked with the EVM status and reschedules as normal. Any other
+        /// failure (unborrowable COA, or a reschedule failure) reverts the whole tick
+        /// with no Ticked; the loop halts until restarted via scheduleNext.
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id _id: UInt64, data _data: AnyStruct?) {
             // Drop the just-executed handle regardless of outcome.
             let executed <- self.current <- nil
             destroy executed
 
-            // COA unborrowable: halt without rescheduling so we don't pay the next
-            // tick's fee for a call that can't run. Resumes via scheduleNext().
-            guard let coaRef = self.coa.borrow() else {
-                emit TickFailed(
-                    reason: "COA capability invalid",
-                    feeVaultBalance: self.feeProvider.borrow()?.balance
-                )
-                return
-            }
+            // COA unborrowable reverts the tick (no Ticked); resumes via scheduleNext().
+            let coaRef = self.coa.borrow() ?? panic("COA capability unborrowable")
 
             let result = coaRef.call(
                 to: self.targetAddress,
@@ -244,7 +211,7 @@ access(all) contract VaultRebalancer {
                 evmGasUsed: result.gasUsed
             )
 
-            let _ = self.scheduleNext()
+            self.scheduleNext()
         }
 
     }

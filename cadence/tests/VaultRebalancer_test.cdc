@@ -130,32 +130,26 @@ access(all) fun testSetTickIntervalPersistsAndEmits() {
     Test.assertEqual(20.0, result.returnValue! as! UFix64)
 }
 
-// Failure path A: broken fee-provider cap → TickFailed emitted at schedule time.
-access(all) fun testTickFailedOnInvalidFeeProvider() {
+// A broken fee-provider cap can't be borrowed, so scheduleNext panics and the
+// whole tick reverts; nothing is scheduled, surfaced as the absence of Ticked.
+access(all) fun testHaltsOnInvalidFeeProvider() {
     Test.expect(_setupRebalancer(targetHex: brokenFeeTarget, coaPath: workingCoa, feeProviderPath: nonexistentVault), Test.beSucceeded())
-    Test.expect(_scheduleNext(targetHex: brokenFeeTarget), Test.beSucceeded())
+    Test.expect(_scheduleNext(targetHex: brokenFeeTarget), Test.beFailed())
 
-    let failed = Test.eventsOfType(Type<VaultRebalancer.TickFailed>())
-    Test.assertEqual(1, failed.length)
-
-    let evt = failed[0] as! VaultRebalancer.TickFailed
-    Test.assertEqual("fee provider capability invalid", evt.reason)
-    Test.expect(evt.feeVaultBalance, Test.beNil())
+    Test.assertEqual(0, Test.eventsOfType(Type<VaultRebalancer.Scheduled>()).length)
 }
 
-// Failure path B: broken COA cap → schedules fine, TickFailed emitted when tick runs.
-access(all) fun testTickFailedOnInvalidCoa() {
+// A broken COA cap still schedules fine, but when the tick fires the handler
+// can't borrow the COA, so it returns before the EVM call: no Ticked, and the
+// loop stops (no reschedule).
+access(all) fun testHaltsOnInvalidCoa() {
     Test.expect(_setupRebalancer(targetHex: brokenCoaTarget, coaPath: nonexistentCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
     Test.expect(_scheduleNext(targetHex: brokenCoaTarget), Test.beSucceeded())
+    Test.assertEqual(1, Test.eventsOfType(Type<VaultRebalancer.Scheduled>()).length)
 
     Test.moveTime(by: 15.0)
     Test.commitBlock()
 
-    let failed = Test.eventsOfType(Type<VaultRebalancer.TickFailed>())
-    Test.assertEqual(1, failed.length)
-
-    let evt = failed[0] as! VaultRebalancer.TickFailed
-    Test.assertEqual("COA capability invalid", evt.reason)
-    // Fee provider works here, so balance is non-nil.
-    Test.expect(evt.feeVaultBalance, Test.not(Test.beNil()))
+    Test.assertEqual(0, Test.eventsOfType(Type<VaultRebalancer.Ticked>()).length)
+    Test.assertEqual(1, Test.eventsOfType(Type<VaultRebalancer.Scheduled>()).length)
 }
