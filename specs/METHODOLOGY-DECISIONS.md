@@ -46,3 +46,9 @@ Supersede, don't delete: to revise, add a new MD that flips the old one's status
 - **Why:** the spec-kit framing pushes business/strategy into versioned specs ("catch Roham up" + Constitution Principle VII), but a public repo cannot carry candid internal detail. This split keeps the public surface useful and self-contained without over-exposing.
 - **Path to a check:** rule in [`AUTHORING.md`](./AUTHORING.md) §12; enforced in PR review.
 - **Private store (RESOLVED 2026-06-10, Alex):** the access-gated home for FCM's own sensitive spec detail is the **`FCM Top-Level Product Spec` gDrive folder** (read+write workspace inside the shared `Flow Team` google drive, under the `FCM` folder). Public specs/docs reference it by name; it is registered in [`../docs/external-sources.md`](../docs/external-sources.md), and structured cold-AI-style (an index points to detail). Remaining courtesy item (non-blocking): Patrick Fuchs — product & technical lead — should still see/endorse the public/private split for visibility.
+
+### MD-006 — Consolidate on new information; don't just append   (status: accepted)
+- **Date / provenance:** 2026-06-11 · `AlexHentschel`
+- **Decision:** When new or more precise information arrives, **check for related existing records and consolidate/correct/sharpen them in place** rather than merely appending. Avoid bloat (incorporate and consolidate, not accrete). Applies across the spec, the private store, working notes, and memory.
+- **Why:** limited early analysis often yields fuzzy/partly-imprecise results that get sharpened later (a prevalent pattern); appending leaves stale/imprecise content standing and bloats the spec.
+- **Path to a check:** [`AUTHORING.md`](./AUTHORING.md) §9. Caveat: in create-only stores (the current Drive integration has no update/delete) in-place consolidation is blocked, so a dated correction note is a forced fallback; resolving that editability gap enables proper consolidation.

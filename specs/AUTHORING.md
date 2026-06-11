@@ -112,6 +112,8 @@ A lesson is only "captured" when it lands as **a constitution principle, a check
 
 On any fix, ask **"which existing rule should have caught this?"** and fix that rule, not just the symptom.
 
+**Consolidate, don't append.** When new or more precise information arrives (a fuzzy early result sharpened later is the normal path), first check whether a related record already exists and **correct/sharpen it in place** rather than piling on a new note. Records should get *more correct and more specific* over time, not just longer. Avoid bloat: incorporate and consolidate. (Where a store is immutable, e.g. the create-only Drive integration with no update/delete, an in-place fix is impossible and a dated correction note is a forced fallback, not the goal; resolving that editability gap is preferred.) See `MD-006`.
+
 ## 10. Writing rules (for editing the constitution or these conventions)
 
 Every normative rule should state four things, or it's a fact pretending to be a rule:
