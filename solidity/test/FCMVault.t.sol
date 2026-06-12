@@ -846,13 +846,9 @@ contract FCMVaultTest is Test {
         assertLt(vault.previewDeposit(amount), vault.convertToShares(amount), "fee subtracted");
     }
 
-    /// @notice previewDeposit stays conservative on a vault that already holds a
-    ///         position, not only on the first deposit into an empty vault.
+    /// @notice Holds on a non-empty vault too.
     function test_PreviewDeposit_NoMoreThanActual_NonEmptyVault() public {
-        // Establish the existing position within this test so it is self-contained
-        // and does not rely on state left by any other test.
         _depositFor(user, 1 ether);
-
         _allow(bob);
         uint256 amount = 3 ether;
         uint256 predicted = vault.previewDeposit(amount);
@@ -918,9 +914,9 @@ contract FCMVaultTest is Test {
     }
 
     /// @notice Path A (yield appreciated): the yield slice sells for more than the
-    ///         pro-rata debt, so previewRedeem adds a surplus instead of scaling
-    ///         collateral down. Asserts the surplus engages rather than matching the
-    ///         redeem, whose price-blind 1:1 mock router mis-values the surplus leg.
+    ///         pro-rata debt, so previewRedeem adds a surplus on top of the
+    ///         collateral instead of scaling it down — the quote rises above both
+    ///         the pre-appreciation baseline and the full deposit.
     function test_PreviewRedeem_PathA_YieldAppreciates() public {
         uint256 amount = 1 ether;
         uint256 shares = _depositFor(user, amount);
@@ -936,35 +932,97 @@ contract FCMVaultTest is Test {
         assertGt(predicted, amount, "surplus reconciled on top of pro-rata collateral");
     }
 
-    /// @notice The previews value debt at its accrued (`expectedDebt`) level, not
-    ///         the stale stored value. With a non-zero borrow rate, time passing
-    ///         must move both previews even though `totalAssets` (which reads the
-    ///         stored debt) is unchanged until someone accrues. Guards the
-    ///         `expectedDebt` wiring that the 0%-default IRM would leave untested.
+    /// @notice Core: the previews value debt at its accrued (`expectedDebt`) level.
+    ///         After a year of non-zero interest, previewRedeem must equal the
+    ///         realized redeem (which accrues first), while `totalAssets` — read off
+    ///         the stale stored debt — stays put until that accrual. (The 0% default
+    ///         IRM would make this pass trivially.)
     function test_Preview_AccountForAccruedInterest() public {
-        uint256 amount = 10 ether;
-        uint256 shares = _depositFor(user, amount);
-
+        uint256 shares = _depositFor(user, 10 ether);
         uint256 totalAssetsBefore = vault.totalAssets();
-        uint256 redeemBefore = vault.previewRedeem(shares);
-        uint256 depositBefore = vault.previewDeposit(amount);
 
-        // Charge a non-zero borrow rate (~10%/yr) and let a year pass so interest
-        // accrues. Stored debt only moves on accrual; expectedDebt reflects it now.
+        // Charge ~10%/yr and let a year pass. expectedDebt reflects the interest
+        // immediately; stored debt only moves once someone accrues.
         MockIrm(MOCK_IRM).setRate(uint256(0.1e18) / 365 days);
         vm.warp(block.timestamp + 365 days);
 
+        // Stale stored-debt NAV hasn't moved (nobody accrued)...
         assertEq(vault.totalAssets(), totalAssetsBefore, "stored NAV stale until accrual");
-        assertLt(vault.previewRedeem(shares), redeemBefore, "previewRedeem honors accrued debt");
-        assertGt(vault.previewDeposit(amount), depositBefore, "previewDeposit honors accrued debt");
+
+        // ...but the preview prices the accrued debt, matching the realized redeem.
+        uint256 predicted = vault.previewRedeem(shares);
+        vm.prank(user);
+        uint256 actual = vault.redeem(shares, user, user);
+        assertLe(predicted, actual, "preview <= actual");
+        assertApproxEqRel(predicted, actual, 1e15, "preview == actual under accrued interest");
+    }
+
+    /// @notice previewDeposit's twin of the redeem check: it sizes both the NAV and
+    ///         the borrow off the accrued `expectedDebt`, so under a year of interest
+    ///         it matches a real deposit (which accrues first), not the stale debt.
+    function test_PreviewDeposit_AccountsForAccruedInterest() public {
+        _depositFor(user, 10 ether);
+
+        MockIrm(MOCK_IRM).setRate(uint256(0.1e18) / 365 days);
+        vm.warp(block.timestamp + 365 days);
+
+        // Quote computed while stored debt is still stale; the real deposit accrues
+        // first, so they agree only because the preview used expectedDebt.
+        uint256 predicted = vault.previewDeposit(10 ether);
+        _allow(bob);
+        uint256 actual = _depositFor(bob, 10 ether);
+        assertLe(predicted, actual, "preview <= actual");
+        assertApproxEqRel(predicted, actual, 1e15, "previewDeposit == actual under accrued interest");
     }
 
     /// @notice EIP-4626: previewDeposit MUST NOT account for deposit limits
-    ///         (`maxDeposit`) and must quote as though the deposit is accepted.
-    ///         `carol` is not allow-listed, so her `maxDeposit` is 0, yet
-    ///         previewDeposit still returns the would-be shares.
+    ///         (`maxDeposit`) — it quotes as though the deposit is accepted. `carol`
+    ///         isn't allow-listed (maxDeposit == 0), yet the shares it quotes equal
+    ///         what she actually receives once the limit is lifted.
     function test_PreviewDeposit_IgnoresDepositLimit() public {
+        uint256 amount = 1 ether;
         assertEq(vault.maxDeposit(carol), 0, "deposit blocked by the limit");
-        assertGt(vault.previewDeposit(1 ether), 0, "preview ignores the deposit limit");
+        uint256 predicted = vault.previewDeposit(amount);
+
+        _allow(carol);
+        uint256 actual = _depositFor(carol, amount);
+        assertLe(predicted, actual, "preview <= actual");
+        assertApproxEqRel(predicted, actual, 1e15, "quote matches the accepted deposit");
+    }
+
+    /// @notice EIP-4626: previewDeposit MUST NOT account for the TVL limit (`maxTvl`).
+    ///         Near the cap, `maxDeposit` shrinks to the remaining headroom and an
+    ///         over-cap `deposit` reverts — yet previewDeposit quotes the over-cap
+    ///         amount identically with or without the cap, i.e. as if accepted.
+    function test_PreviewDeposit_IgnoresTvlLimit() public {
+        _depositFor(user, 1 ether);
+        uint256 nav = vault.totalAssets();
+
+        // Cap the vault to ~1 ether of headroom.
+        vm.prank(admin);
+        vault.setMaxTvl(nav + 1 ether);
+        assertEq(vault.maxDeposit(user), 1 ether, "maxDeposit == maxTvl - totalAssets");
+
+        // Quote a deposit well over the headroom, with the cap in place...
+        uint256 over = 5 ether;
+        uint256 cappedQuote = vault.previewDeposit(over);
+        assertGt(cappedQuote, 0, "quotes the over-cap deposit");
+
+        // ...then lift the cap: the quote is byte-identical, so previewDeposit never
+        // read maxTvl.
+        vm.prank(admin);
+        vault.setMaxTvl(type(uint256).max);
+        assertEq(cappedQuote, vault.previewDeposit(over), "previewDeposit ignores the TVL limit");
+
+        // Sanity: with the cap restored the real over-cap deposit reverts — the limit
+        // is real, and the preview deliberately ignored it.
+        vm.prank(admin);
+        vault.setMaxTvl(nav + 1 ether);
+        MockERC20(address(WETH)).mint(user, over);
+        vm.startPrank(user);
+        WETH.approve(address(vault), over);
+        vm.expectRevert();
+        vault.deposit(over, user);
+        vm.stopPrank();
     }
 }

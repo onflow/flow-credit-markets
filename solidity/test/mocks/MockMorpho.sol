@@ -4,7 +4,9 @@ pragma solidity ^0.8.19;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {Id, MarketParams, Position, Market} from "@morpho-blue/interfaces/IMorpho.sol";
+import {IIrm} from "@morpho-blue/interfaces/IIrm.sol";
 import {MarketParamsLib} from "@morpho-blue/libraries/MarketParamsLib.sol";
+import {MathLib} from "@morpho-blue/libraries/MathLib.sol";
 
 import {MockERC20} from "./MockERC20.sol";
 
@@ -13,6 +15,7 @@ import {MockERC20} from "./MockERC20.sol";
 ///      getters instead of going through Morpho's periphery `extSloads`.
 contract MockMorpho {
     using MarketParamsLib for MarketParams;
+    using MathLib for uint256;
 
     mapping(Id => mapping(address => Position)) public position;
     mapping(Id => Market) public market;
@@ -20,8 +23,18 @@ contract MockMorpho {
     uint256 internal constant VIRTUAL_SHARES = 1e6;
     uint256 internal constant VIRTUAL_ASSETS = 1;
 
+    /// @dev Applies pending interest like Morpho's periphery (`wTaylorCompounded`
+    ///      at the IRM rate over the elapsed time), so post-accrual stored debt
+    ///      equals the `expectedDebt` a view read first. No-op at the 0% default.
     function accrueInterest(MarketParams memory mp) external {
-        market[mp.id()].lastUpdate = uint128(block.timestamp);
+        Market storage m = market[mp.id()];
+        uint256 elapsed = block.timestamp - m.lastUpdate;
+        if (elapsed != 0 && m.totalBorrowAssets != 0) {
+            uint256 rate = IIrm(mp.irm).borrowRateView(mp, m);
+            uint256 interest = uint256(m.totalBorrowAssets).wMulDown(rate.wTaylorCompounded(elapsed));
+            m.totalBorrowAssets += uint128(interest);
+        }
+        m.lastUpdate = uint128(block.timestamp);
     }
 
     function supplyCollateral(
