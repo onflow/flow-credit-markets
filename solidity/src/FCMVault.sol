@@ -143,9 +143,19 @@ contract FCMVault is ERC4626, AccessControl {
     ///         need an up-to-the-block NAV must accrue interest on the
     ///         market in the same tx first (see `deposit`).
     function totalAssets() public view override returns (uint256) {
+        return _totalAssets(market.debt());
+    }
+
+    /// @dev NAV computed against an explicit `debt`, so a view that cannot
+    ///      accrue interest first (e.g. `previewDeposit`) can pass
+    ///      `market.expectedDebt()` (interest accrued to the current block)
+    ///      instead of the stale stored debt. `totalAssets` passes the stored
+    ///      `market.debt()`, which is fresh whenever the caller accrued first
+    ///      in the same tx (as `deposit` does).
+    function _totalAssets(uint256 debt) internal view returns (uint256) {
         uint256 assetAmount = market.collateral();
         uint256 yieldInAsset = _yieldToAsset(yieldToken.balanceOf(address(this)));
-        uint256 debtInAsset = market.debtToCollateral(market.debt());
+        uint256 debtInAsset = market.debtToCollateral(debt);
         uint256 gross = assetAmount + yieldInAsset;
         if (gross > debtInAsset) {
             return gross - debtInAsset;
@@ -463,15 +473,18 @@ contract FCMVault is ERC4626, AccessControl {
     ///         deterministic borrow→yield pool fee (`feeYieldDebt`).
     ///         LIMITATION: EXCLUDES AMM price impact — not computable in a `view`
     ///         for a Uniswap-V3-fork pool (`QuoterV2` is non-`view`) — so it may
-    ///         marginally overestimate the realized result under impact, and it
-    ///         reads a stale NAV (a view cannot accrue interest first as `deposit`
-    ///         does). It is an estimate, not a guarantee: slippage is bounded by a
-    ///         min-out at the deposit call site, not by this preview.
+    ///         marginally overestimate the realized result under impact. It is an
+    ///         estimate, not a guarantee: slippage is bounded by a min-out at the
+    ///         deposit call site, not by this preview.
     function previewDeposit(uint256 assets) public view override returns (uint256) {
-        uint256 navBefore = totalAssets();
+        // A view cannot accrue interest as `deposit` does, so use `expectedDebt`
+        // (interest accrued to the current block via Morpho periphery) for both
+        // the NAV and the borrow sizing; otherwise the preview reads stale debt.
+        uint256 expected = market.expectedDebt();
+        uint256 navBefore = _totalAssets(expected);
         // Size the borrow on the would-be post-supply collateral, as `deposit`
         // does (it supplies `assets` before borrowing; a view must simulate it).
-        uint256 toBorrow = _targetBorrowFor(assets, market.collateral() + assets);
+        uint256 toBorrow = _targetBorrowFor(assets, market.collateral() + assets, expected);
         // At the oracle the borrow and the yield bought with it net to zero
         // except the pool fee paid on the borrow→yield swap. That fee is the
         // depositor's NAV cost, so contributed = assets − feePaid (in asset units).
@@ -538,17 +551,19 @@ contract FCMVault is ERC4626, AccessControl {
     ///      `healthFactorTarget` regardless of new asset size) is the job of
     ///      `rebalance`, not `deposit`.
     function _targetBorrowAgainst(uint256 newAssets) internal view returns (uint256) {
-        return _targetBorrowFor(newAssets, market.collateral());
+        return _targetBorrowFor(newAssets, market.collateral(), market.debt());
     }
 
     /// @dev `_targetBorrowAgainst` sized against an explicit `collateralBase`
     ///      rather than the live collateral. `deposit` supplies `assets` before
     ///      borrowing, so it sizes against the post-supply collateral; a `view`
     ///      preview cannot observe that, so `previewDeposit` passes
-    ///      `currentCollateral + assets` here. Behaviour is identical to the
-    ///      prior inline form: `capFromTargetDebt = maxBorrow(collateralBase) /
-    ///      target − currentDebt`, clamped to 0.
-    function _targetBorrowFor(uint256 newAssets, uint256 collateralBase)
+    ///      `currentCollateral + assets` here. `currentDebt` is likewise passed
+    ///      in: `deposit` passes the accrued `market.debt()`, a view passes
+    ///      `market.expectedDebt()`, so the cap is never sized off stale debt.
+    ///      `capFromTargetDebt = maxBorrow(collateralBase) / target − currentDebt`,
+    ///      clamped to 0.
+    function _targetBorrowFor(uint256 newAssets, uint256 collateralBase, uint256 currentDebt)
         internal
         view
         returns (uint256)
@@ -558,7 +573,6 @@ contract FCMVault is ERC4626, AccessControl {
             market.maxBorrowFor(newAssets).mulDiv(MarketLib.WAD, healthFactorTarget);
         uint256 targetDebt =
             market.maxBorrowFor(collateralBase).mulDiv(MarketLib.WAD, healthFactorTarget);
-        uint256 currentDebt = market.debt();
         uint256 capFromTargetDebt = targetDebt > currentDebt ? targetDebt - currentDebt : 0;
         return capFromNewAsset < capFromTargetDebt ? capFromNewAsset : capFromTargetDebt;
     }
