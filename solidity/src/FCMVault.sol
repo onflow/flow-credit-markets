@@ -510,9 +510,10 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step {
     ///         deterministic borrow→yield pool fee (`feeYieldDebt`).
     ///         LIMITATION: EXCLUDES AMM price impact — not computable in a `view`
     ///         for a Uniswap-V3-fork pool (`QuoterV2` is non-`view`) — so it may
-    ///         marginally overestimate the realized result under impact. It is an
-    ///         estimate, not a guarantee: slippage is bounded by a min-out at the
-    ///         deposit call site, not by this preview.
+    ///         overestimate the realized result under impact, relaxing EIP-4626's
+    ///         "no more than" guarantee. That residual is slippage: bounded by a
+    ///         min-out at the integrator/router (e.g. the ERC4626-Alliance router),
+    ///         not by the vault or this preview.
     function previewDeposit(uint256 assets) public view override returns (uint256) {
         // A view cannot accrue interest as `deposit` does, so use `expectedDebt`
         // (interest accrued to the current block via Morpho periphery) for both
@@ -541,10 +542,11 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step {
     ///         - Case B (`loanGot < d*`): collateral scaled by `loanGot / d*`.
     ///         LIMITATION: EXCLUDES AMM *price impact* — not computable in a
     ///         `view` for a Uniswap-V3-fork pool (`QuoterV2` is non-`view`) — so
-    ///         it may marginally overestimate the realized result under impact.
-    ///         It is an estimate, not a guarantee: slippage is bounded by a min-out
-    ///         at the redeem call site, not by this preview. Rounds down, matching
-    ///         `redeem`.
+    ///         it may overestimate the realized result under impact, relaxing
+    ///         EIP-4626's "no more than" guarantee. That residual is slippage:
+    ///         bounded by a min-out at the integrator/router (e.g. the
+    ///         ERC4626-Alliance router), not by the vault or this preview. Rounds
+    ///         down, matching `redeem`.
     function previewRedeem(uint256 shares) public view override returns (uint256) {
         if (shares == 0) return 0;
         uint256 claims = _totalClaims();
