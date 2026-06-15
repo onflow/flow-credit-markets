@@ -972,7 +972,9 @@ contract FCMVaultTest is Test {
         _allow(bob);
         uint256 actual = _depositFor(bob, 10 ether);
         assertLe(predicted, actual, "preview <= actual");
-        assertApproxEqRel(predicted, actual, 1e15, "previewDeposit == actual under accrued interest");
+        assertApproxEqRel(
+            predicted, actual, 1e15, "previewDeposit == actual under accrued interest"
+        );
     }
 
     /// @notice EIP-4626: previewDeposit MUST NOT account for deposit limits

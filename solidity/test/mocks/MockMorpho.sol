@@ -31,7 +31,8 @@ contract MockMorpho {
         uint256 elapsed = block.timestamp - m.lastUpdate;
         if (elapsed != 0 && m.totalBorrowAssets != 0) {
             uint256 rate = IIrm(mp.irm).borrowRateView(mp, m);
-            uint256 interest = uint256(m.totalBorrowAssets).wMulDown(rate.wTaylorCompounded(elapsed));
+            uint256 interest =
+                uint256(m.totalBorrowAssets).wMulDown(rate.wTaylorCompounded(elapsed));
             m.totalBorrowAssets += uint128(interest);
         }
         m.lastUpdate = uint128(block.timestamp);
