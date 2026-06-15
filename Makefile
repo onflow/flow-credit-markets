@@ -48,8 +48,10 @@ mainnet-update-oracle:
 # Inputs come from the environment:
 #   PRIVATE_KEY   deployer key (becomes vault admin/owner on deploy)
 #   SEED_AMOUNT   mainnet-seed-market: loan token base units to supply
-#   MAX_TVL       mainnet-deploy: initial TVL limit (asset base units)
+#   MAX_TVL       mainnet-deploy / mainnet-set-max-tvl: TVL limit (asset base units)
 #   VAULT         mainnet-check: address of the deployed FCMVault
+#   SWAP_AMOUNT   mainnet-swap-weth: FLOW wei to convert (default: half balance)
+#   SLIPPAGE_BPS  mainnet-swap-weth: max swap slippage in bps (default 300)
 # ---------------------------------------------------------------------------
 
 FLOW_MAINNET_RPC ?= https://mainnet.evm.nodes.onflow.org
@@ -74,6 +76,21 @@ mainnet-deploy-dry:
 	cd solidity && forge script script/DeployVault.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
 mainnet-deploy:
 	cd solidity && forge script script/DeployVault.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+
+# Update a deployed vault's TVL limit (e.g. raise from 0 to open deposits).
+.PHONY: mainnet-set-max-tvl mainnet-set-max-tvl-dry
+mainnet-set-max-tvl-dry:
+	cd solidity && forge script script/SetMaxTvl.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+mainnet-set-max-tvl:
+	cd solidity && forge script script/SetMaxTvl.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+
+# Acquire WETH (vault collateral) for the deployer by wrapping native FLOW and
+# swapping WFLOW -> WETH on FlowSwap V3. Fund the deployer before mainnet-check.
+.PHONY: mainnet-swap-weth mainnet-swap-weth-dry
+mainnet-swap-weth-dry:
+	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+mainnet-swap-weth:
+	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
 
 # Live integration check: real deposit + redeem against a deployed vault.
 # Spends real funds (swap fees) — dry-run first.
