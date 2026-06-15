@@ -1,5 +1,5 @@
 .PHONY: ci
-ci: solidity-fmt solidity-build solidity-test
+ci: solidity-fmt solidity-build solidity-test cadence-test
 
 .PHONY: solidity-fmt
 solidity-fmt:
@@ -16,6 +16,26 @@ solidity-build:
 .PHONY: solidity-test
 solidity-test:
 	cd solidity && FOUNDRY_PROFILE=ci forge test -vvv
+
+.PHONY: cadence-test
+cadence-test:
+	flow test
+
+# ---------------------------------------------------------------------------
+# Pyth oracle maintenance (Flow EVM mainnet — MANUAL ONLY)
+#
+# Pyth on Flow is a pull oracle: the FLOW/ETH/BTC feeds backing the Morpho
+# market oracles lapse after their heartbeat (~1h) and then revert with
+# StalePrice. Push a fresh Hermes update before any vault operation.
+# Needs curl (forge --ffi). PRIVATE_KEY signs + pays the (tiny) update fee.
+# ---------------------------------------------------------------------------
+FLOW_MAINNET_RPC ?= https://mainnet.evm.nodes.onflow.org
+
+.PHONY: mainnet-update-oracle mainnet-update-oracle-dry
+mainnet-update-oracle-dry:
+	cd solidity && forge script script/UpdatePythPrices.s.sol --rpc-url $(FLOW_MAINNET_RPC) --ffi --private-key $(PRIVATE_KEY)
+mainnet-update-oracle:
+	cd solidity && forge script script/UpdatePythPrices.s.sol --rpc-url $(FLOW_MAINNET_RPC) --ffi --broadcast --private-key $(PRIVATE_KEY)
 
 # ---------------------------------------------------------------------------
 # Mainnet deployment (Flow EVM mainnet — MANUAL ONLY, never run from CI)
