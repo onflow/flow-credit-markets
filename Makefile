@@ -49,7 +49,8 @@ mainnet-update-oracle:
 #   PRIVATE_KEY   deployer key (becomes vault admin/owner on deploy)
 #   SEED_AMOUNT   mainnet-seed-market: loan token base units to supply
 #   MAX_TVL       mainnet-deploy / mainnet-set-max-tvl: TVL limit (asset base units)
-#   VAULT         mainnet-check: address of the deployed FCMVault
+#   VAULT         mainnet-check / mainnet-set-max-tvl / mainnet-grant-access: FCMVault address
+#   EARLY_ACCESS_GRANTEES  mainnet-grant-access: comma-separated addrs to allow-list
 #   SWAP_AMOUNT   mainnet-swap-weth: FLOW wei to convert (default: half balance)
 #   SLIPPAGE_BPS  mainnet-swap-weth: max swap slippage in bps (default 300)
 # ---------------------------------------------------------------------------
@@ -83,6 +84,14 @@ mainnet-set-max-tvl-dry:
 	cd solidity && forge script script/SetMaxTvl.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
 mainnet-set-max-tvl:
 	cd solidity && forge script script/SetMaxTvl.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+
+# Allow-list accounts on a deployed vault (grant EARLY_ACCESS_ROLE so they can
+# deposit/hold/receive shares). Re-runnable; already-listed addresses skipped.
+.PHONY: mainnet-grant-access mainnet-grant-access-dry
+mainnet-grant-access-dry:
+	cd solidity && forge script script/GrantEarlyAccess.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+mainnet-grant-access:
+	cd solidity && forge script script/GrantEarlyAccess.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
 
 # Acquire WETH (vault collateral) for the deployer by wrapping native FLOW and
 # swapping WFLOW -> WETH on FlowSwap V3. Fund the deployer before mainnet-check.
