@@ -49,10 +49,11 @@ mainnet-update-oracle:
 #   PRIVATE_KEY   deployer key (becomes vault admin/owner on deploy)
 #   SEED_AMOUNT   mainnet-seed-market: loan token base units to supply
 #   MAX_TVL       mainnet-deploy / mainnet-set-max-tvl: TVL limit (asset base units)
-#   VAULT         mainnet-check / mainnet-set-max-tvl / mainnet-grant-access: FCMVault address
+#   VAULT         mainnet-check / mainnet-set-max-tvl / mainnet-grant-access / mainnet-rebalance: FCMVault address
 #   EARLY_ACCESS_GRANTEES  mainnet-grant-access: comma-separated addrs to allow-list
 #   SWAP_AMOUNT   mainnet-swap-weth: FLOW wei to convert (default: half balance)
 #   SLIPPAGE_BPS  mainnet-swap-weth: max swap slippage in bps (default 300)
+#   FORCE         mainnet-rebalance: rebalance even inside the dead band (default false)
 # ---------------------------------------------------------------------------
 
 FLOW_MAINNET_RPC ?= https://mainnet.evm.nodes.onflow.org
@@ -100,6 +101,15 @@ mainnet-swap-weth-dry:
 	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
 mainnet-swap-weth:
 	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+
+# Rebalance a deployed vault's leveraged position back toward its target health
+# factor (permissionless). FORCE=true rebalances even when HF is inside the
+# dead band. Push a fresh oracle update (mainnet-update-oracle) first.
+.PHONY: mainnet-rebalance mainnet-rebalance-dry
+mainnet-rebalance-dry:
+	cd solidity && forge script script/Rebalance.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+mainnet-rebalance:
+	cd solidity && forge script script/Rebalance.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
 
 # Live integration check: real deposit + redeem against a deployed vault.
 # Spends real funds (swap fees) — dry-run first.
