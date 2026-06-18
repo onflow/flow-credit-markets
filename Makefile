@@ -38,18 +38,14 @@ mainnet-update-oracle:
 	cd solidity && forge script script/UpdatePythPrices.s.sol --rpc-url $(FLOW_MAINNET_RPC) --ffi --broadcast --account $(ACCOUNT)
 
 # ---------------------------------------------------------------------------
-# Mainnet deployment (Flow EVM mainnet — MANUAL ONLY, never run from CI)
+# Mainnet deployment (Flow EVM mainnet)
 #
 # All deployments are deliberate, operator-driven actions against real funds.
 # Every target has a *-dry variant that fork-simulates the exact transaction
-# sequence against live mainnet state for free — ALWAYS dry-run first.
-# Runbook: solidity/README.md#mainnet-deployment
+# sequence against live mainnet state.
 #
-# The signer is a Foundry encrypted keystore account (never a raw key on the
-# command line). Import it once with `make setup-evm-deployer`, then pass its
-# name via ACCOUNT (default: flow-evm-deployer). Forge prompts for the keystore
-# password at runtime; the key never appears in the environment, in `ps`, in
-# shell history, or in make's recipe echo.
+# The signer is a Foundry encrypted keystore account. Set it up once with
+# `make setup-evm-deployer`, then pass its name via ACCOUNT (default: flow-evm-deployer).
 #
 # Inputs come from the environment:
 #   ACCOUNT       keystore account name to sign with (becomes vault admin/owner
@@ -68,8 +64,7 @@ ACCOUNT ?= flow-evm-deployer
 
 # Import the EVM deployer key into Foundry's encrypted keystore (one-time,
 # per-dev). Prompts for the raw key and a password to encrypt it under
-# ~/.foundry/keystores/$(ACCOUNT) — the raw key never touches the command line,
-# the environment, or shell history. All mainnet-* targets sign via this account.
+# ~/.foundry/keystores/$(ACCOUNT). All mainnet-* targets sign via this account.
 .PHONY: setup-evm-deployer
 setup-evm-deployer:
 	cast wallet import $(ACCOUNT) --interactive
