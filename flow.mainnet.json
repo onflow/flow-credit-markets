@@ -1,0 +1,16 @@
+{
+	"accounts": {
+		"mainnet-deployer": {
+			"address": "${FLOW_DEPLOYER_ADDRESS}",
+			"key": "${FLOW_DEPLOYER_PRIVATE_KEY}"
+		}
+	},
+	"deployments": {
+		"mainnet": {
+			"mainnet-deployer": ["VaultRebalancer"]
+		},
+		"mainnet-fork": {
+			"mainnet-deployer": ["VaultRebalancer"]
+		}
+	}
+}
