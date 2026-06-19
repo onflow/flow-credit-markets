@@ -27,26 +27,29 @@ cadence-test:
 # Pyth on Flow is a pull oracle: the FLOW/ETH/BTC feeds backing the Morpho
 # market oracles lapse after their heartbeat (~1h) and then revert with
 # StalePrice. Push a fresh Hermes update before any vault operation.
-# Needs curl (forge --ffi). PRIVATE_KEY signs + pays the (tiny) update fee.
+# Needs curl (forge --ffi). ACCOUNT signs + pays the (tiny) update fee.
 # ---------------------------------------------------------------------------
 FLOW_MAINNET_RPC ?= https://mainnet.evm.nodes.onflow.org
 
 .PHONY: mainnet-update-oracle mainnet-update-oracle-dry
 mainnet-update-oracle-dry:
-	cd solidity && forge script script/UpdatePythPrices.s.sol --rpc-url $(FLOW_MAINNET_RPC) --ffi --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/UpdatePythPrices.s.sol --rpc-url $(FLOW_MAINNET_RPC) --ffi --account $(ACCOUNT)
 mainnet-update-oracle:
-	cd solidity && forge script script/UpdatePythPrices.s.sol --rpc-url $(FLOW_MAINNET_RPC) --ffi --broadcast --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/UpdatePythPrices.s.sol --rpc-url $(FLOW_MAINNET_RPC) --ffi --broadcast --account $(ACCOUNT)
 
 # ---------------------------------------------------------------------------
-# Mainnet deployment (Flow EVM mainnet — MANUAL ONLY, never run from CI)
+# Mainnet deployment (Flow EVM mainnet)
 #
 # All deployments are deliberate, operator-driven actions against real funds.
 # Every target has a *-dry variant that fork-simulates the exact transaction
-# sequence against live mainnet state for free — ALWAYS dry-run first.
-# Runbook: solidity/README.md#mainnet-deployment
+# sequence against live mainnet state.
+#
+# The signer is a Foundry encrypted keystore account. Set it up once with
+# `make setup-evm-deployer`, then pass its name via ACCOUNT (default: flow-evm-deployer).
 #
 # Inputs come from the environment:
-#   PRIVATE_KEY   deployer key (becomes vault admin/owner on deploy)
+#   ACCOUNT       keystore account name to sign with (becomes vault admin/owner
+#                 on deploy); default flow-evm-deployer
 #   SEED_AMOUNT   mainnet-seed-market: loan token base units to supply
 #   MAX_TVL       mainnet-deploy / mainnet-set-max-tvl: TVL limit (asset base units)
 #   VAULT         mainnet-check / mainnet-set-max-tvl / mainnet-grant-access / mainnet-rebalance: FCMVault address
@@ -57,6 +60,14 @@ mainnet-update-oracle:
 # ---------------------------------------------------------------------------
 
 FLOW_MAINNET_RPC ?= https://mainnet.evm.nodes.onflow.org
+ACCOUNT ?= flow-evm-deployer
+
+# Import the EVM deployer key into Foundry's encrypted keystore (one-time,
+# per-dev). Prompts for the raw key and a password to encrypt it under
+# ~/.foundry/keystores/$(ACCOUNT). All mainnet-* targets sign via this account.
+.PHONY: setup-evm-deployer
+setup-evm-deployer:
+	cast wallet import $(ACCOUNT) --interactive
 
 # Read-only report: market/pool/oracle state and (optional DEPLOYER=0x...)
 # account balances. Run before anything else.
@@ -67,57 +78,57 @@ mainnet-status:
 # Supply loan-token liquidity to the Morpho market (one-time prerequisite).
 .PHONY: mainnet-seed-market mainnet-seed-market-dry
 mainnet-seed-market-dry:
-	cd solidity && forge script script/SeedMarket.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/SeedMarket.s.sol --rpc-url $(FLOW_MAINNET_RPC) --account $(ACCOUNT)
 mainnet-seed-market:
-	cd solidity && forge script script/SeedMarket.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/SeedMarket.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --account $(ACCOUNT)
 
 # Deploy the yield oracle (if not in deployments/mainnet.json yet) + FCMVault,
 # then grant EARLY_ACCESS_ROLE and set the TVL limit.
 .PHONY: mainnet-deploy mainnet-deploy-dry
 mainnet-deploy-dry:
-	cd solidity && forge script script/DeployVault.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/DeployVault.s.sol --rpc-url $(FLOW_MAINNET_RPC) --account $(ACCOUNT)
 mainnet-deploy:
-	cd solidity && forge script script/DeployVault.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/DeployVault.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --account $(ACCOUNT)
 
 # Update a deployed vault's TVL limit (e.g. raise from 0 to open deposits).
 .PHONY: mainnet-set-max-tvl mainnet-set-max-tvl-dry
 mainnet-set-max-tvl-dry:
-	cd solidity && forge script script/SetMaxTvl.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/SetMaxTvl.s.sol --rpc-url $(FLOW_MAINNET_RPC) --account $(ACCOUNT)
 mainnet-set-max-tvl:
-	cd solidity && forge script script/SetMaxTvl.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/SetMaxTvl.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --account $(ACCOUNT)
 
 # Allow-list accounts on a deployed vault (grant EARLY_ACCESS_ROLE so they can
 # deposit/hold/receive shares). Re-runnable; already-listed addresses skipped.
 .PHONY: mainnet-grant-access mainnet-grant-access-dry
 mainnet-grant-access-dry:
-	cd solidity && forge script script/GrantEarlyAccess.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/GrantEarlyAccess.s.sol --rpc-url $(FLOW_MAINNET_RPC) --account $(ACCOUNT)
 mainnet-grant-access:
-	cd solidity && forge script script/GrantEarlyAccess.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/GrantEarlyAccess.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --account $(ACCOUNT)
 
 # Acquire WETH (vault collateral) for the deployer by wrapping native FLOW and
 # swapping WFLOW -> WETH on FlowSwap V3. Fund the deployer before mainnet-check.
 .PHONY: mainnet-swap-weth mainnet-swap-weth-dry
 mainnet-swap-weth-dry:
-	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --account $(ACCOUNT)
 mainnet-swap-weth:
-	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --account $(ACCOUNT)
 
 # Rebalance a deployed vault's leveraged position back toward its target health
 # factor (permissionless). FORCE=true rebalances even when HF is inside the
 # dead band. Push a fresh oracle update (mainnet-update-oracle) first.
 .PHONY: mainnet-rebalance mainnet-rebalance-dry
 mainnet-rebalance-dry:
-	cd solidity && forge script script/Rebalance.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/Rebalance.s.sol --rpc-url $(FLOW_MAINNET_RPC) --account $(ACCOUNT)
 mainnet-rebalance:
-	cd solidity && forge script script/Rebalance.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/Rebalance.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --account $(ACCOUNT)
 
 # Live integration check: real deposit + redeem against a deployed vault.
 # Spends real funds (swap fees) — dry-run first.
 .PHONY: mainnet-check mainnet-check-dry
 mainnet-check-dry:
-	cd solidity && forge script script/LiveCheck.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/LiveCheck.s.sol --rpc-url $(FLOW_MAINNET_RPC) --account $(ACCOUNT)
 mainnet-check:
-	cd solidity && forge script script/LiveCheck.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --slow --private-key $(PRIVATE_KEY)
+	cd solidity && forge script script/LiveCheck.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --slow --account $(ACCOUNT)
 
 # Offline + fork tests for the yield oracle (fork tests auto-skip without the env var).
 .PHONY: mainnet-fork-test
@@ -126,7 +137,7 @@ mainnet-fork-test:
 
 # Full deployment rehearsal on an anvil fork of mainnet: seed -> deploy ->
 # live check, with state carried between steps, against real Morpho/FlowSwap/
-# Pyth contracts. Zero real funds; needs no PRIVATE_KEY. Run before any real
+# Pyth contracts. Zero real funds; needs no signer/ACCOUNT. Run before any real
 # deployment. Details: solidity/script/rehearse.sh
 .PHONY: mainnet-rehearse
 mainnet-rehearse:
