@@ -101,8 +101,9 @@ mainnet-swap-weth-dry:
 mainnet-swap-weth:
 	cd solidity && forge script script/SwapForWeth.s.sol --rpc-url $(FLOW_MAINNET_RPC) --broadcast --private-key $(PRIVATE_KEY)
 
-# Live integration check: real deposit + redeem against a deployed vault.
-# Spends real funds (swap fees) — dry-run first.
+# Live integration check: real deposit + rebalance + redeem against a deployed
+# vault. The rebalance is forced but runs against live state, so it may be a
+# no-op. Spends real funds (swap fees) — dry-run first.
 .PHONY: mainnet-check mainnet-check-dry
 mainnet-check-dry:
 	cd solidity && forge script script/LiveCheck.s.sol --rpc-url $(FLOW_MAINNET_RPC) --private-key $(PRIVATE_KEY)
