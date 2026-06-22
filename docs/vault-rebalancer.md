@@ -46,51 +46,6 @@ One Cadence resource per EVM target, owned by an admin account. Stored at a dete
 
 ---
 
-## Deployment
-
-Deployment is **manual** and targets Flow mainnet directly, mirroring the EVM
-side (see the root README). The contract is owned by a deployer account
-configured in the `flow.mainnet.json` overlay — kept separate from the base
-`flow.json` so `flow test` / `make ci` never require the deployer's env vars.
-
-Set the deployer credentials (the account becomes the resource owner and pays
-scheduling fees):
-
-```bash
-export FLOW_DEPLOYER_ADDRESS=0x…           # Flow account address
-export FLOW_DEPLOYER_PRIVATE_KEY=…         # ECDSA_P256 / SHA3_256, key index 0
-```
-
-The three steps, each with a `-dry` variant that runs against a local emulator
-forked from live mainnet state — **always dry-run first**. Start the fork in a
-separate terminal:
-
-```bash
-make mainnet-fork-emulator                 # flow emulator --fork mainnet
-```
-
-Then, against `--network mainnet-fork` (`-dry`) or real `--network mainnet`:
-
-```bash
-# 1. Publish the VaultRebalancer contract.
-make mainnet-deploy-rebalancer-dry
-make mainnet-deploy-rebalancer
-
-# 2. Create the Rebalancer resource targeting the FCMVault. VAULT is the
-#    FCMVault EVM address; calldata is hardcoded to rebalance(false) and the
-#    scheduler priority to Medium. Size the tunables to the measured worst-case
-#    rebalance() cost (see Effort and gas sizing above).
-make mainnet-setup-rebalancer-dry VAULT=0x… TICK_INTERVAL=3600.0 EVM_GAS_LIMIT=200000 EXECUTION_EFFORT=20000
-make mainnet-setup-rebalancer     VAULT=0x… TICK_INTERVAL=3600.0 EVM_GAS_LIMIT=200000 EXECUTION_EFFORT=20000
-
-# 3. Kick off the self-rescheduling tick loop (permissionless, idempotent).
-make mainnet-schedule-rebalancer-dry VAULT=0x…
-make mainnet-schedule-rebalancer     VAULT=0x…
-```
-
-The deployer account must hold enough FLOW to cover the per-tick scheduling fee
-plus the account storage minimum; depletion halts the loop (see *Failure modes*).
-
 ## Future scope
 
 Possible evolutions of this design — none load-bearing for v0.2:

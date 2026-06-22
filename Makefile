@@ -43,7 +43,7 @@ mainnet-update-oracle:
 # All deployments are deliberate, operator-driven actions against real funds.
 # Every target has a *-dry variant that fork-simulates the exact transaction
 # sequence against live mainnet state for free — ALWAYS dry-run first.
-# Runbook: solidity/README.md#mainnet-deployment
+# Runbook: README.md#deployment
 #
 # Inputs come from the environment:
 #   PRIVATE_KEY   deployer key (becomes vault admin/owner on deploy)
@@ -129,7 +129,7 @@ mainnet-rehearse:
 # interval via FlowTransactionScheduler (FLIP-330). Deploying it is three
 # deliberate steps: publish the contract, create the per-target Rebalancer
 # resource pointing at the FCMVault, then kick off the self-rescheduling loop.
-# Runbook: docs/vault-rebalancer.md#deployment
+# Runbook: README.md#deployment
 #
 # Signing uses the flow.json `mainnet-deployer` account, sourced from the env:
 #   FLOW_DEPLOYER_ADDRESS      deployer account address (becomes resource owner)

@@ -23,14 +23,53 @@ See [Architecture](./docs/architecture.md)
 
 ## Deployment
 
-Deployments are **manual** and target Flow EVM mainnet directly — see the
-[deployment runbook](./solidity/README.md#mainnet-deployment). Dependency
-addresses used at deploy time are pinned in
+All deployment is **manual** and runs against Flow mainnet through `make`
+targets — never from CI. Every target has a `-dry` variant: EVM `-dry` targets
+fork-simulate the transaction against live mainnet state (no broadcast, no
+funds); Cadence `-dry` targets run against a local mainnet-forked emulator.
+Dependency addresses pinned at deploy time live in
 [`solidity/deployments/mainnet.json`](./solidity/deployments/mainnet.json).
 
-The Cadence `VaultRebalancer` that automates `FCMVault.rebalance()` is deployed
-separately via the `make mainnet-deploy-rebalancer` / `-setup-` / `-schedule-`
-targets — see the [rebalancer runbook](./docs/vault-rebalancer.md#deployment).
+### EVM contracts (FCMVault + yield oracle)
+
+Environment: `PRIVATE_KEY` is the deployer (becomes vault admin/owner).
+`FLOW_MAINNET_RPC` defaults to the public mainnet RPC.
+
+```bash
+make mainnet-rehearse                                   # full fork rehearsal — no key, no funds
+make mainnet-update-oracle                              # push fresh Pyth prices (feeds lapse ~1h)
+make mainnet-seed-market SEED_AMOUNT=<loan base units>  # supply loan-token liquidity (one-time)
+make mainnet-deploy MAX_TVL=<asset base units>          # deploy oracle + FCMVault, grant access, set TVL
+make mainnet-grant-access VAULT=0x… EARLY_ACCESS_GRANTEES=0x…,0x…   # allow-list depositors
+make mainnet-check VAULT=0x…                            # live deposit + redeem against the vault
+```
+
+`make mainnet-status [DEPLOYER=0x…]` prints market/pool/oracle state and
+balances at any time. `make mainnet-set-max-tvl VAULT=0x… MAX_TVL=…` adjusts the
+TVL limit on a deployed vault. `make mainnet-swap-weth SWAP_AMOUNT=<FLOW wei>
+[SLIPPAGE_BPS=300]` acquires WETH collateral for the deployer.
+
+### Cadence contract (VaultRebalancer)
+
+Automates `FCMVault.rebalance()` on an interval via `FlowTransactionScheduler`.
+Environment: `FLOW_DEPLOYER_ADDRESS` and `FLOW_DEPLOYER_PRIVATE_KEY`
+(ECDSA_P256 / SHA3_256, key index 0) — the account becomes the resource owner
+and pays scheduling fees. These are read from the `flow.mainnet.json` overlay,
+so `flow test` / `make ci` never require them. For `-dry`, start a forked
+emulator in a separate terminal with `make mainnet-fork-emulator`.
+
+`VAULT` is the FCMVault EVM address from the EVM deploy above:
+
+```bash
+make mainnet-deploy-rebalancer
+make mainnet-setup-rebalancer VAULT=0x… TICK_INTERVAL=3600.0 EVM_GAS_LIMIT=200000 EXECUTION_EFFORT=20000
+make mainnet-schedule-rebalancer VAULT=0x…
+```
+
+Calldata is hardcoded to `rebalance(false)` and scheduler priority to Medium.
+The deployer must hold enough FLOW for the per-tick scheduling fee plus the
+account storage minimum. Size the tunables to measured worst-case `rebalance()`
+cost — see the [rebalancer design notes](./docs/vault-rebalancer.md).
 
 ### Deployed contracts (Flow EVM mainnet)
 
