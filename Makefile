@@ -145,18 +145,10 @@ mainnet-rehearse:
 	cd solidity && ./script/rehearse.sh
 
 # ---------------------------------------------------------------------------
-# Cadence VaultRebalancer deployment (Flow mainnet — MANUAL ONLY, never CI)
+# Cadence VaultRebalancer deployment (Flow mainnet)
 #
-# The rebalancer is a Cadence resource that pokes FCMVault.rebalance() on an
-# interval via FlowTransactionScheduler (FLIP-330). Deploying it is three
-# deliberate steps: publish the contract, create the per-target Rebalancer
-# resource pointing at the FCMVault, then kick off the self-rescheduling loop.
 # Runbook: README.md#deployment
-#
-# Signing uses the `mainnet-deployer` account from the flow.mainnet.json overlay
-# (the account becomes the resource owner and pays scheduling fees). Its key is
-# read from a gitignored `.private-key` file (ECDSA_P256 / SHA3_256, key index 0);
-# the deployer address is pinned in the overlay.
+# Signing uses the `mainnet-deployer` account from flow.mainnet.json.
 #
 # Per-step inputs:
 #   VAULT             setup/schedule: FCMVault EVM address the tick calls (0x…)
@@ -165,16 +157,12 @@ mainnet-rehearse:
 #   EXECUTION_EFFORT  setup: Cadence execution-effort budget per tick
 #
 # Every target has a *-dry variant that runs against a local emulator forked
-# from live mainnet state — ALWAYS dry-run first. Start the fork in another
-# terminal with `make mainnet-fork-emulator`; the *-dry targets then sign with
+# from live mainnet state. Start the fork in another terminal with
+# `make mainnet-fork-emulator`. the *-dry targets then sign with
 # the real deployer key against the forked account state (--network mainnet-fork).
 #
 # Calldata is hardcoded to rebalance(false): selector 0xebb61595 + a 32-byte
 # zero arg = the UInt8 array below. Scheduler priority is Medium (rawValue 1).
-#
-# The mainnet-deployer account lives in the flow.mainnet.json overlay (loaded
-# only here, via -f), keeping the base flow.json — and `flow test` / `make ci`
-# — free of the deployer account and its gitignored key file.
 # ---------------------------------------------------------------------------
 
 # Base config + mainnet-deployer overlay, for every deploy/setup/schedule target.
