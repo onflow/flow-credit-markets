@@ -170,12 +170,14 @@ SETUP_ARGS := [{"type":"String","value":"$(VAULT)"},{"type":"Path","value":{"dom
 mainnet-fork-emulator:
 	flow emulator --fork mainnet
 
-# Step 1: publish the VaultRebalancer contract to the deployer account.
+# Step 1: publish the VaultRebalancer contract to the deployer account. Idempotent:
+# --update re-deploys in place when the contract already exists (e.g. to ship an
+# additive change), subject to Cadence contract-update validation.
 .PHONY: mainnet-deploy-rebalancer mainnet-deploy-rebalancer-dry
 mainnet-deploy-rebalancer-dry:
-	flow project deploy $(FLOW_CONFIG) --network mainnet-fork
+	flow project deploy $(FLOW_CONFIG) --network mainnet-fork --update
 mainnet-deploy-rebalancer:
-	flow project deploy $(FLOW_CONFIG) --network mainnet
+	flow project deploy $(FLOW_CONFIG) --network mainnet --update
 
 # Step 2: create + save the Rebalancer resource targeting VAULT (FCMVault).
 .PHONY: mainnet-setup-rebalancer mainnet-setup-rebalancer-dry
@@ -190,6 +192,17 @@ mainnet-schedule-rebalancer-dry:
 	flow transactions send cadence/transactions/schedule_next.cdc $(FLOW_CONFIG) --network mainnet-fork --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
 mainnet-schedule-rebalancer:
 	flow transactions send cadence/transactions/schedule_next.cdc $(FLOW_CONFIG) --network mainnet --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
+
+# Teardown: cancel the pending tick (refunding its fee to the deployer's FlowToken
+# vault) and destroy the Rebalancer resource for VAULT, freeing its storage path.
+# Stops the loop and reclaims fee funds from an unused/misconfigured rebalancer;
+# the same target can then be re-created with mainnet-setup-rebalancer. Debugging /
+# operational cleanup only.
+.PHONY: mainnet-remove-rebalancer mainnet-remove-rebalancer-dry
+mainnet-remove-rebalancer-dry:
+	flow transactions send cadence/transactions/remove_rebalancer.cdc $(FLOW_CONFIG) --network mainnet-fork --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
+mainnet-remove-rebalancer:
+	flow transactions send cadence/transactions/remove_rebalancer.cdc $(FLOW_CONFIG) --network mainnet --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
 
 # ---------------------------------------------------------------------------
 # Security scanning (LOCAL ONLY, containerized)

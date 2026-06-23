@@ -66,10 +66,24 @@ make mainnet-setup-rebalancer VAULT=0x… TICK_INTERVAL=3600.0 EVM_GAS_LIMIT=200
 make mainnet-schedule-rebalancer VAULT=0x…
 ```
 
+`mainnet-deploy-rebalancer` is idempotent (`--update`): re-running it ships an
+additive contract change in place, subject to Cadence contract-update validation.
+
+To tear a rebalancer down — cancel its pending tick (refunding the fee to the
+deployer's FlowToken vault), destroy the resource, and free its storage path so the
+same target can be re-created — use the remove target. This is the way to stop fee
+drain on an unused or misconfigured rebalancer:
+
+```bash
+make mainnet-remove-rebalancer VAULT=0x…
+```
+
 Calldata is hardcoded to `rebalance(false)` and scheduler priority to Medium.
 The deployer must hold enough FLOW for the per-tick scheduling fee plus the
-account storage minimum. Size the tunables to measured worst-case `rebalance()`
-cost — see the [rebalancer design notes](./docs/vault-rebalancer.md).
+account storage minimum. The scheduling fee scales with `EXECUTION_EFFORT`
+(≈0.0002 FLOW per effort unit; e.g. 20000 → ~4 FLOW per tick), so the deployer
+must be funded for the full run. Size the tunables to measured worst-case
+`rebalance()` cost — see the [rebalancer design notes](./docs/vault-rebalancer.md).
 
 ### Deployed contracts (Flow EVM mainnet)
 
