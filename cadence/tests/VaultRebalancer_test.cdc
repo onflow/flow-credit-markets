@@ -70,6 +70,34 @@ access(all) fun _setTickInterval(targetHex: String, newInterval: UFix64): Test.T
     return _executeTransaction("../transactions/set_tick_interval.cdc", [targetHex, newInterval], admin)
 }
 
+// Full teardown: cancel the pending tick (refunding its fee) and destroy the resource.
+access(all) fun _removeRebalancer(targetHex: String): Test.TransactionResult {
+    return _executeTransaction("../transactions/remove_rebalancer.cdc", [targetHex], admin)
+}
+
+// Cancel-only: load the rebalancer, call cancel(), and put it back — exercises
+// cancel() in isolation (no destroy), so the resource stays usable afterward.
+access(all) fun _cancelRebalancer(targetHex: String): Test.TransactionResult {
+    let code = "import \"VaultRebalancer\"\n"
+        .concat("import \"EVM\"\n")
+        .concat("transaction(targetHex: String) {\n")
+        .concat("  prepare(signer: auth(Storage) &Account) {\n")
+        .concat("    let target = EVM.addressFromString(targetHex)\n")
+        .concat("    let path = VaultRebalancer.deriveRebalancerStoragePath(target: target)\n")
+        .concat("    let r <- signer.storage.load<@VaultRebalancer.Rebalancer>(from: path)\n")
+        .concat("      ?? panic(\"rebalancer not in storage\")\n")
+        .concat("    r.cancel()\n")
+        .concat("    signer.storage.save(<-r, to: path)\n")
+        .concat("  }\n")
+        .concat("}")
+    return Test.executeTransaction(Test.Transaction(
+        code: code,
+        authorizers: [admin.address],
+        signers: [admin],
+        arguments: [targetHex]
+    ))
+}
+
 access(all) fun testCreateRebalancer() {
     Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
 }
@@ -152,4 +180,63 @@ access(all) fun testHaltsOnInvalidCoa() {
 
     Test.assertEqual(0, Test.eventsOfType(Type<VaultRebalancer.Ticked>()).length)
     Test.assertEqual(1, Test.eventsOfType(Type<VaultRebalancer.Scheduled>()).length)
+}
+
+// cancel() cancels the live scheduled tick — the scheduler emits Canceled and (via
+// FlowTransactionScheduler.cancel) refunds the fee into the deployer's FlowToken vault
+// — while leaving the resource itself in place. (The refund magnitude depends on the
+// scheduler's refundMultiplier and is exercised end-to-end in the mainnet-fork rehearsal;
+// the emulator used by `flow test` refunds nothing, so balance isn't asserted here.)
+access(all) fun testCancelCancelsScheduledTick() {
+    Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
+    Test.expect(_scheduleNext(targetHex: mainTarget), Test.beSucceeded())
+    Test.assertEqual(1, Test.eventsOfType(Type<VaultRebalancer.Scheduled>()).length)
+
+    Test.expect(_cancelRebalancer(targetHex: mainTarget), Test.beSucceeded())
+
+    // The scheduler recorded the cancellation, and the resource is untouched / readable.
+    Test.assertEqual(1, Test.eventsOfType(Type<FlowTransactionScheduler.Canceled>()).length)
+    Test.expect(_getTickInterval(targetHex: mainTarget), Test.beSucceeded())
+}
+
+// After cancel() the pending tick never fires, and because `current` is cleared the
+// permissionless scheduleNext() can re-arm the loop.
+access(all) fun testCancelStopsLoopButAllowsResume() {
+    Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
+    Test.expect(_scheduleNext(targetHex: mainTarget), Test.beSucceeded())
+    Test.expect(_cancelRebalancer(targetHex: mainTarget), Test.beSucceeded())
+
+    // Past the original tick time: nothing fires, because the tick was canceled.
+    Test.moveTime(by: 15.0)
+    Test.commitBlock()
+    Test.assertEqual(0, Test.eventsOfType(Type<VaultRebalancer.Ticked>()).length)
+
+    // current was cleared, so the loop can be restarted (a second Scheduled is emitted).
+    Test.expect(_scheduleNext(targetHex: mainTarget), Test.beSucceeded())
+    Test.assertEqual(2, Test.eventsOfType(Type<VaultRebalancer.Scheduled>()).length)
+}
+
+// cancel() is a no-op when nothing is scheduled: it succeeds, emits no Canceled, and
+// leaves the resource intact.
+access(all) fun testCancelNoOpWhenNothingScheduled() {
+    Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
+
+    Test.expect(_cancelRebalancer(targetHex: mainTarget), Test.beSucceeded())
+    Test.assertEqual(0, Test.eventsOfType(Type<FlowTransactionScheduler.Canceled>()).length)
+    Test.expect(_getTickInterval(targetHex: mainTarget), Test.beSucceeded())
+}
+
+// remove_rebalancer cancels the pending tick and destroys the resource, freeing the
+// storage path so the same target can be set up again.
+access(all) fun testRemoveCancelsAndFreesPath() {
+    Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
+    Test.expect(_scheduleNext(targetHex: mainTarget), Test.beSucceeded())
+
+    Test.expect(_removeRebalancer(targetHex: mainTarget), Test.beSucceeded())
+    Test.assertEqual(1, Test.eventsOfType(Type<FlowTransactionScheduler.Canceled>()).length)
+
+    // The resource is gone: reading its tickInterval now fails.
+    Test.expect(_getTickInterval(targetHex: mainTarget), Test.beFailed())
+    // The path is free: a fresh setup at the same target succeeds.
+    Test.expect(_setupRebalancer(targetHex: mainTarget, coaPath: workingCoa, feeProviderPath: workingFeeProvider), Test.beSucceeded())
 }

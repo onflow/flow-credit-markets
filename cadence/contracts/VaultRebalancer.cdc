@@ -184,6 +184,29 @@ access(all) contract VaultRebalancer {
             emit Scheduled(id: scheduledId, nextTickAt: nextTime, fee: fee)
         }
 
+        /// Cancels the pending scheduled tick (if any) and refunds its fee to the
+        /// feeProvider vault, halting the loop. Intended for teardown: callers
+        /// typically destroy the resource immediately afterward (see
+        /// remove_rebalancer.cdc), freeing the storage path so a fresh setup can be
+        /// created and reclaiming the outstanding tick fee from an unused rebalancer.
+        /// A no-op when there is no live (Scheduled) tick to cancel; a stale finalized
+        /// handle is just dropped.
+        access(Configure) fun cancel() {
+            if self.current == nil {
+                return
+            }
+            let scheduled <- self.current <- nil
+            let tx <- scheduled!
+            // Only a Scheduled tx can be canceled (and refunded); drop anything finalized.
+            if tx.status() != FlowTransactionScheduler.Status.Scheduled {
+                destroy tx
+                return
+            }
+            let refund <- FlowTransactionScheduler.cancel(scheduledTx: <-tx)
+            let vault = self.feeProvider.borrow() ?? panic("fee provider capability unborrowable")
+            vault.deposit(from: <-refund)
+        }
+
         /// FlowTransactionScheduler.TransactionHandler entry point, called by the
         /// scheduler at tick time. A reverting EVM call does NOT halt the loop: it
         /// emits Ticked with the EVM status and reschedules as normal. Any other
