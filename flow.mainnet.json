@@ -1,8 +1,11 @@
 {
 	"accounts": {
 		"mainnet-deployer": {
-			"address": "${FLOW_DEPLOYER_ADDRESS}",
-			"key": "${FLOW_DEPLOYER_PRIVATE_KEY}"
+			"address": "ddbb70fec825f636",
+			"key": {
+				"type": "file",
+				"location": ".private-key"
+			}
 		}
 	},
 	"deployments": {
