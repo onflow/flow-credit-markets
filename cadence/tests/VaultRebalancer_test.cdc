@@ -78,24 +78,7 @@ access(all) fun _removeRebalancer(targetHex: String): Test.TransactionResult {
 // Cancel-only: load the rebalancer, call cancel(), and put it back — exercises
 // cancel() in isolation (no destroy), so the resource stays usable afterward.
 access(all) fun _cancelRebalancer(targetHex: String): Test.TransactionResult {
-    let code = "import \"VaultRebalancer\"\n"
-        .concat("import \"EVM\"\n")
-        .concat("transaction(targetHex: String) {\n")
-        .concat("  prepare(signer: auth(Storage) &Account) {\n")
-        .concat("    let target = EVM.addressFromString(targetHex)\n")
-        .concat("    let path = VaultRebalancer.deriveRebalancerStoragePath(target: target)\n")
-        .concat("    let r <- signer.storage.load<@VaultRebalancer.Rebalancer>(from: path)\n")
-        .concat("      ?? panic(\"rebalancer not in storage\")\n")
-        .concat("    r.cancel()\n")
-        .concat("    signer.storage.save(<-r, to: path)\n")
-        .concat("  }\n")
-        .concat("}")
-    return Test.executeTransaction(Test.Transaction(
-        code: code,
-        authorizers: [admin.address],
-        signers: [admin],
-        arguments: [targetHex]
-    ))
+    return _executeTransaction("../transactions/cancel_rebalancer.cdc", [targetHex], admin)
 }
 
 access(all) fun testCreateRebalancer() {
