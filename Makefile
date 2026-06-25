@@ -161,15 +161,15 @@ mainnet-rehearse:
 # `make mainnet-fork-emulator`. the *-dry targets then sign with
 # the real deployer key against the forked account state (--network mainnet-fork).
 #
-# Calldata is hardcoded to rebalance(false): selector 0xebb61595 + a 32-byte
-# zero arg = the UInt8 array below. Scheduler priority is Medium (rawValue 1).
+# Calldata is hardcoded to rebalance(): the bare 4-byte selector 0x7d7c2a1c
+# (no arguments) = the UInt8 array below. Scheduler priority is Medium (rawValue 1).
 # ---------------------------------------------------------------------------
 
 # Base config + mainnet-deployer overlay, for every deploy/setup/schedule target.
 FLOW_CONFIG := -f flow.json -f flow.mainnet.json
 
-# rebalance(false) calldata as a JSON-CDC [UInt8]: 0xeb,0xb6,0x15,0x95 then 32 zero bytes.
-REBALANCE_CALLDATA := {"type":"Array","value":[{"type":"UInt8","value":"235"},{"type":"UInt8","value":"182"},{"type":"UInt8","value":"21"},{"type":"UInt8","value":"149"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"},{"type":"UInt8","value":"0"}]}
+# rebalance() calldata as a JSON-CDC [UInt8]: the 4 selector bytes 0x7d,0x7c,0x2a,0x1c.
+REBALANCE_CALLDATA := {"type":"Array","value":[{"type":"UInt8","value":"125"},{"type":"UInt8","value":"124"},{"type":"UInt8","value":"42"},{"type":"UInt8","value":"28"}]}
 
 # Full JSON-CDC argument list for setup_rebalancer.cdc. coaPath /storage/evm and
 # feeProviderPath /storage/flowTokenVault are the deployer's COA + FlowToken vault.
