@@ -1,0 +1,19 @@
+{
+  "accounts": {
+    "mainnet-deployer": {
+      "address": "ddbb70fec825f636",
+      "key": {
+        "type": "file",
+        "location": ".mainnet-cadence-deployer-private-key"
+      }
+    }
+  },
+  "deployments": {
+    "mainnet": {
+      "mainnet-deployer": ["VaultRebalancer"]
+    },
+    "mainnet-fork": {
+      "mainnet-deployer": ["VaultRebalancer"]
+    }
+  }
+}

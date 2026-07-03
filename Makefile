@@ -144,8 +144,76 @@ mainnet-fork-test:
 mainnet-rehearse:
 	cd solidity && ./script/rehearse.sh
 
-# mainnet-deploy-rebalancer: Cadence VaultRebalancer (PR #38) deployment will
-# slot in here once that PR merges — it consumes the FCMVault address.
+# ---------------------------------------------------------------------------
+# Cadence VaultRebalancer deployment (Flow mainnet)
+#
+# Runbook: README.md#deployment
+# Signing uses the `mainnet-deployer` account from flow.mainnet.json.
+#
+# Per-step inputs:
+#   VAULT             setup/schedule: FCMVault EVM address the tick calls (0x…)
+#   TICK_INTERVAL     setup: seconds between ticks (e.g. 3600.0)
+#   EVM_GAS_LIMIT     setup: gas cap for the rebalance() EVM call (e.g. 200000)
+#   EXECUTION_EFFORT  setup: Cadence execution-effort budget per tick
+#
+# Every target has a *-dry variant that runs against a local emulator forked
+# from live mainnet state. Start the fork in another terminal with
+# `make mainnet-fork-emulator`. the *-dry targets then sign with
+# the real deployer key against the forked account state (--network mainnet-fork).
+#
+# Calldata is hardcoded to rebalance(): the bare 4-byte selector 0x7d7c2a1c
+# (no arguments) = the UInt8 array below. Scheduler priority is Medium (rawValue 1).
+# ---------------------------------------------------------------------------
+
+# Base config + mainnet-deployer overlay, for every deploy/setup/schedule target.
+FLOW_CONFIG := -f flow.json -f flow.mainnet.json
+
+# rebalance() calldata as a JSON-CDC [UInt8]: the 4 selector bytes 0x7d,0x7c,0x2a,0x1c.
+REBALANCE_CALLDATA := {"type":"Array","value":[{"type":"UInt8","value":"125"},{"type":"UInt8","value":"124"},{"type":"UInt8","value":"42"},{"type":"UInt8","value":"28"}]}
+
+# Full JSON-CDC argument list for setup_rebalancer.cdc. coaPath /storage/evm and
+# feeProviderPath /storage/flowTokenVault are the deployer's COA + FlowToken vault.
+SETUP_ARGS := [{"type":"String","value":"$(VAULT)"},{"type":"Path","value":{"domain":"storage","identifier":"evm"}},{"type":"Path","value":{"domain":"storage","identifier":"flowTokenVault"}},$(REBALANCE_CALLDATA),{"type":"UInt8","value":"1"},{"type":"UFix64","value":"$(TICK_INTERVAL)"},{"type":"UInt64","value":"$(EVM_GAS_LIMIT)"},{"type":"UInt64","value":"$(EXECUTION_EFFORT)"}]
+
+# Start a local emulator forked from live mainnet state (run in its own terminal
+# for the *-dry rehearsals; Ctrl-C to stop).
+.PHONY: mainnet-fork-emulator
+mainnet-fork-emulator:
+	flow emulator --fork mainnet
+
+# Step 1: publish the VaultRebalancer contract to the deployer account. Idempotent:
+# --update re-deploys in place when the contract already exists (e.g. to ship an
+# additive change), subject to Cadence contract-update validation.
+.PHONY: mainnet-deploy-rebalancer mainnet-deploy-rebalancer-dry
+mainnet-deploy-rebalancer-dry:
+	flow project deploy $(FLOW_CONFIG) --network mainnet-fork --update
+mainnet-deploy-rebalancer:
+	flow project deploy $(FLOW_CONFIG) --network mainnet --update
+
+# Step 2: create + save the Rebalancer resource targeting VAULT (FCMVault).
+.PHONY: mainnet-setup-rebalancer mainnet-setup-rebalancer-dry
+mainnet-setup-rebalancer-dry:
+	flow transactions send cadence/transactions/setup_rebalancer.cdc $(FLOW_CONFIG) --network mainnet-fork --signer mainnet-deployer --args-json '$(SETUP_ARGS)'
+mainnet-setup-rebalancer:
+	flow transactions send cadence/transactions/setup_rebalancer.cdc $(FLOW_CONFIG) --network mainnet --signer mainnet-deployer --args-json '$(SETUP_ARGS)'
+
+# Step 3: kick off the self-rescheduling tick loop (permissionless, idempotent).
+.PHONY: mainnet-schedule-rebalancer mainnet-schedule-rebalancer-dry
+mainnet-schedule-rebalancer-dry:
+	flow transactions send cadence/transactions/schedule_next.cdc $(FLOW_CONFIG) --network mainnet-fork --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
+mainnet-schedule-rebalancer:
+	flow transactions send cadence/transactions/schedule_next.cdc $(FLOW_CONFIG) --network mainnet --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
+
+# Teardown: cancel the pending tick (refunding its fee to the deployer's FlowToken
+# vault) and destroy the Rebalancer resource for VAULT, freeing its storage path.
+# Stops the loop and reclaims fee funds from an unused/misconfigured rebalancer;
+# the same target can then be re-created with mainnet-setup-rebalancer. Debugging /
+# operational cleanup only.
+.PHONY: mainnet-remove-rebalancer mainnet-remove-rebalancer-dry
+mainnet-remove-rebalancer-dry:
+	flow transactions send cadence/transactions/remove_rebalancer.cdc $(FLOW_CONFIG) --network mainnet-fork --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
+mainnet-remove-rebalancer:
+	flow transactions send cadence/transactions/remove_rebalancer.cdc $(FLOW_CONFIG) --network mainnet --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
 
 # ---------------------------------------------------------------------------
 # Security scanning (LOCAL ONLY, containerized)
