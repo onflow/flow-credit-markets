@@ -216,17 +216,41 @@ mainnet-remove-rebalancer:
 	flow transactions send cadence/transactions/remove_rebalancer.cdc $(FLOW_CONFIG) --network mainnet --signer mainnet-deployer --args-json '[{"type":"String","value":"$(VAULT)"}]'
 
 # ---------------------------------------------------------------------------
-# Security scanning (LOCAL ONLY, containerized)
+# Security scanning (containerized)
 #
-# This repository is PUBLIC and the contracts hold real value. Security scans
-# are intentionally NOT run in CI — public Actions logs, issues, PR comments,
-# and artifacts would leak live vulnerabilities. Every scanner runs inside a
-# locked-down Docker container (see security/docker/) so untrusted analysis —
-# especially community AI skills — cannot read host files or secrets:
+# This repository is PUBLIC and the contracts hold real value, so the tiers
+# differ in where they may run:
+#
+#   AI tier (ai-review/ai-audit/ai-skills) + Aderyn -> LOCAL ONLY.
+#     The AI tier synthesizes exploit paths that are NOT trivially reproducible
+#     from source; publishing them (public Actions logs / PR comments) would
+#     leak live vulnerabilities. Its reports stay in security/reports/
+#     (gitignored) and are never committed or posted.
+#
+#   Static gate (Slither + Solhint) -> ALSO RUNS IN CI as a merge gate.
+#     Both are deterministic and reproducible from the (public) source, so an
+#     attacker can already run them against this repo — surfacing their output
+#     in CI leaks nothing new, while the gate keeps flagged code from shipping.
+#     See .github/workflows/security-static.yml. Reproduce it locally with
+#     `make security-ci`.
+#
+# Every scanner still runs inside a locked-down Docker container (see
+# security/docker/) so untrusted analysis — especially community AI skills —
+# cannot read host files or secrets:
 #   static tier -> no network at all
 #   AI tier     -> egress restricted to the Anthropic API; needs a Claude
 #                  credential (see Credentials in docs/security-scanning.md)
-# Reports stay in security/reports/ (gitignored) and are never committed/posted.
+#
+# SEVERITY GATE: `make security-ci` (and CI) run Slither with --fail-high, so
+# only High/Critical-impact findings fail; Medium/Low/Info are reported but do
+# not block. Solhint fails on `error`-severity rules only.
+#
+# IGNORING A FALSE ALARM (inline suppression — we do NOT keep a baseline DB):
+#   Slither: on the line ABOVE the flagged statement, with a justification —
+#              // <why this is safe>
+#              // slither-disable-next-line <detector>   (e.g. unused-return)
+#   Solhint: // solhint-disable-next-line <rule-id>      above the flagged line
+#   The detector/rule id is the name printed in the report output.
 #
 # Requires Docker. Build the image once with `make security-build`.
 # ---------------------------------------------------------------------------
@@ -252,7 +276,17 @@ security-set-token:
 security-check-cred:
 	./security/scan.sh check-cred
 
-# Run all non-AI static analyzers (sealed, no network).
+# Reproduce the CI merge gate locally: exactly Slither + Solhint (no Aderyn, no
+# AI tier), same tools/versions/config as .github/workflows/security-static.yml.
+# Aderyn is excluded from the gate on purpose: its severity model is only
+# High/Low (too coarse to gate on), its sole "High" here was a false positive,
+# and its suppression story is weaker. Run it separately with `make
+# security-aderyn` as an advisory local check.
+.PHONY: security-ci
+security-ci: security-slither security-solhint
+
+# Run all non-AI static analyzers locally (sealed, no network). Superset of the
+# CI gate — adds Aderyn as an advisory (non-gating) check.
 .PHONY: security-static
 security-static: security-slither security-aderyn security-solhint
 

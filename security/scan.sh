@@ -139,8 +139,15 @@ case "${1:-}" in
     ;;
 
   slither)
+    # --fail-high mirrors the CI gate (.github/workflows/security-static.yml):
+    # exit non-zero ONLY on High/Critical-impact findings. Lower-severity
+    # findings are still written to the report for review but do not fail.
+    # Suppress a false positive inline (no baseline DB): put
+    #   // slither-disable-next-line <detector>
+    # on the line above the flagged statement (detector id = the name printed
+    # in the report, e.g. unused-return).
     out="$REPORTS/slither-report-$(stamp).txt"
-    static_run bash -c 'cd solidity && slither . --config-file slither.config.json' 2>&1 | tee "$out"
+    static_run bash -c 'cd solidity && slither . --config-file slither.config.json --fail-high' 2>&1 | tee "$out"
     echo ">> Saved: $out"
     ;;
 
