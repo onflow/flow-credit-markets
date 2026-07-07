@@ -246,12 +246,13 @@ mainnet-remove-rebalancer:
 # Solhint fails on `error`-severity rules only. Pre-existing benign Mediums are
 # suppressed inline at their source (grep the contracts for slither-disable).
 #
-# IGNORING A FALSE ALARM (inline suppression — we do NOT keep a baseline DB):
-#   Slither: on the line ABOVE the flagged statement, with a justification —
-#              // <why this is safe>
-#              // slither-disable-next-line <detector>   (e.g. unused-return)
-#   Solhint: // solhint-disable-next-line <rule-id>      above the flagged line
-#   The detector/rule id is the name printed in the report output.
+# IGNORING A FALSE ALARM:
+#   Slither:
+#      // slither-disable-next-line <detector> -> <why this is safe to ignore>
+#   Solhint:
+#      // solhint-disable-next-line <rule-id> -> <why this is safe to ignore>
+#
+# The detector/rule id is the name printed in the report output.
 #
 # Requires Docker. Build the image once with `make security-build`.
 # ---------------------------------------------------------------------------
@@ -279,10 +280,6 @@ security-check-cred:
 
 # Reproduce the CI merge gate locally: exactly Slither + Solhint (no Aderyn, no
 # AI tier), same tools/versions/config as .github/workflows/security-static.yml.
-# Aderyn is excluded from the gate on purpose: its severity model is only
-# High/Low (too coarse to gate on), its sole "High" here was a false positive,
-# and its suppression story is weaker. Run it separately with `make
-# security-aderyn` as an advisory local check.
 .PHONY: security-ci
 security-ci: security-slither security-solhint
 
