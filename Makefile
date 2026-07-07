@@ -241,9 +241,10 @@ mainnet-remove-rebalancer:
 #   AI tier     -> egress restricted to the Anthropic API; needs a Claude
 #                  credential (see Credentials in docs/security-scanning.md)
 #
-# SEVERITY GATE: `make security-ci` (and CI) run Slither with --fail-high, so
-# only High/Critical-impact findings fail; Medium/Low/Info are reported but do
-# not block. Solhint fails on `error`-severity rules only.
+# SEVERITY GATE: `make security-ci` (and CI) run Slither with --fail-medium, so
+# Medium-or-higher-impact findings fail; Low/Info are reported but do not block.
+# Solhint fails on `error`-severity rules only. Pre-existing benign Mediums are
+# suppressed inline at their source (grep the contracts for slither-disable).
 #
 # IGNORING A FALSE ALARM (inline suppression — we do NOT keep a baseline DB):
 #   Slither: on the line ABOVE the flagged statement, with a justification —
