@@ -3,20 +3,20 @@
 **Status:** Draft
 **Owner:** @Jordan Ribbink
 
-A Morpho market oracle ([#75](https://github.com/onflow/flow-credit-markets/issues/75)) whose price can only be advanced through a path that also attempts the vault's `rebalance()`, so the position de-risks in step with price moves. Backed by Pyth. Makes liquidation rarer; it is not a liquidation-prevention guarantee.
+A Morpho market oracle ([#75](https://github.com/onflow/flow-credit-markets/issues/75)) whose price can only be advanced through a path that also attempts the vault's `rebalance()`, so the position de-risks in step with price moves. Backed by an underlying source price oracle (Pyth). Makes liquidation rarer; it is not a liquidation-prevention guarantee.
 
 ## Interface
 
 Implements Morpho `IOracle` — `price() → uint256` (1e36-scaled).
 
-- **`price()`** — if the stored price was written within `T`, return it; otherwise return the live Pyth price (pass-through).
-- **`update()`** (permissionless) — read live Pyth → write the stored price → attempt `rebalance()` (best-effort), which reads the just-written price. The price is written whether or not the rebalance succeeds. (Writing before the rebalance means the existing `rebalance()` needs no change — it reads the oracle as it always has; see *Assumptions*.)
+- **`price()`** — if the stored price was written within `T`, return it; otherwise return the live source price (pass-through).
+- **`update()`** (permissionless) — read the live source price → write the stored price → attempt `rebalance()` (best-effort), which reads the just-written price. The price is written whether or not the rebalance succeeds. (Writing before the rebalance means the existing `rebalance()` needs no change — it reads the oracle as it always has; see *Assumptions*.)
 
 ## Properties
 
 1. **`update()` is the sole writer of the stored price.** Any advance of the market's price is therefore accompanied by a rebalance attempt in the same call — including when a liquidator triggers an update to fetch a fresh mark. The *attempt* is guaranteed; its success is not (best-effort).
 2. **Advances regardless of rebalance outcome.** A failed rebalance never reverts the price write or panics the calling tx.
-3. **Bounded staleness.** The market never reads a stored price older than `T`; past `T`, `price()` falls through to live Pyth.
+3. **Bounded staleness.** The market never reads a stored price older than `T`; past `T`, `price()` falls through to the live source price.
 4. **Permissionless.** Anyone can call `update()`; the price cannot be withheld.
 
 ```mermaid
@@ -24,17 +24,17 @@ sequenceDiagram
     autonumber
     participant Caller as Caller (keeper / anyone)
     participant Oracle
-    participant Pyth
+    participant Source as Source oracle
     participant Vault as FCMVault
     participant Morpho
 
     Caller->>Oracle: update()
-    Oracle->>Pyth: read live price
+    Oracle->>Source: read live price
     Oracle->>Oracle: write stored price
     Oracle->>Vault: best-effort rebalance (reads the just-written price)
     Note over Oracle,Vault: rebalance failure is swallowed, the price stays written
     Morpho->>Oracle: price()
-    Note over Oracle,Morpho: fresh within T, return stored price. else pass through to live Pyth
+    Note over Oracle,Morpho: fresh within T, return stored price. else pass through to the live source
 ```
 
 ## Integration
