@@ -69,16 +69,17 @@ contract SwapForWeth is ConfiguredScript {
         WFLOW.deposit{value: amountIn}();
         // 2. Approve the router and swap WFLOW -> WETH back to the broadcaster.
         WFLOW.approve(c.swapRouter, amountIn);
-        uint256 received = ISwapRouter(c.swapRouter).exactInputSingle(
+        uint256 received = ISwapRouter(c.swapRouter)
+            .exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
-                    tokenIn: address(WFLOW),
-                    tokenOut: weth,
-                    fee: WFLOW_WETH_FEE,
-                    recipient: account,
-                    amountIn: amountIn,
-                    amountOutMinimum: minOut,
-                    sqrtPriceLimitX96: 0
-                })
+                tokenIn: address(WFLOW),
+                tokenOut: weth,
+                fee: WFLOW_WETH_FEE,
+                recipient: account,
+                amountIn: amountIn,
+                amountOutMinimum: minOut,
+                sqrtPriceLimitX96: 0
+            })
             );
         vm.stopBroadcast();
 

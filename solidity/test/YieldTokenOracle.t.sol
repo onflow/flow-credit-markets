@@ -66,10 +66,8 @@ contract YieldTokenOracleTest is Test {
     }
 }
 
-/// @dev Fork tests against the real FUSDEV vault. Skipped unless
-///      FLOW_MAINNET_RPC_URL is set, so the offline test suite stays
-///      self-contained:
-///      FLOW_MAINNET_RPC_URL=https://mainnet.evm.nodes.onflow.org forge test
+/// @dev Fork tests against the real FUSDEV vault. Reads the fork URL from
+///      foundry.toml [rpc_endpoints].flow_mainnet.
 contract YieldTokenOracleForkTest is Test {
     address internal constant FUSDEV = 0xd069d989e2F44B70c65347d1853C0c67e10a9F8D;
     address internal constant PYUSD0 = 0x99aF3EeA856556646C98c8B9b2548Fe815240750;
@@ -77,7 +75,7 @@ contract YieldTokenOracleForkTest is Test {
     bool internal forking;
 
     function setUp() public {
-        string memory rpc = vm.envOr("FLOW_MAINNET_RPC_URL", string(""));
+        string memory rpc = vm.rpcUrl("flow_mainnet");
         if (bytes(rpc).length == 0) return;
         vm.createSelectFork(rpc);
         forking = true;

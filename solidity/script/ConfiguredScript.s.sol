@@ -42,6 +42,7 @@ abstract contract ConfiguredScript is Script {
         address yieldOracle;
         address swapFactory;
         address swapRouter;
+        address swapper;
         address yieldDebtPool;
         uint256 recoveryDelay;
     }
@@ -71,6 +72,7 @@ abstract contract ConfiguredScript is Script {
         c.yieldOracle = vm.parseTomlAddress(toml, ".yieldOracle");
         c.swapFactory = vm.parseTomlAddress(toml, ".swapFactory");
         c.swapRouter = vm.parseTomlAddress(toml, ".swapRouter");
+        c.swapper = vm.parseTomlAddress(toml, ".swapper");
         c.yieldDebtPool = vm.parseTomlAddress(toml, ".yieldDebtPool");
         c.recoveryDelay = vm.parseTomlUint(toml, ".recoveryDelay");
     }

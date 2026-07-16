@@ -8,7 +8,6 @@ import {Market, Id} from "@morpho-blue/interfaces/IMorpho.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 import {FCMVault} from "../src/FCMVault.sol";
-import {FlowSwapSwapper} from "../src/FlowSwapSwapper.sol";
 import {YieldTokenOracle} from "../src/YieldTokenOracle.sol";
 import {ConfiguredScript} from "./ConfiguredScript.s.sol";
 
@@ -56,9 +55,6 @@ contract DeployVault is ConfiguredScript {
         require(p > 0, "yield oracle reports zero price");
         console.log("yield oracle deployed at %s, NAV price %s", yieldOracle, p);
 
-        FlowSwapSwapper swap = new FlowSwapSwapper(c.swapRouter);
-        console.log("swapper deployed at %s, router %s", address(swap), c.swapRouter);
-
         FCMVault vault = new FCMVault(
             FCMVault.InitParams({
                 collateral: IERC20(c.collateral),
@@ -76,7 +72,7 @@ contract DeployVault is ConfiguredScript {
                 healthFactorMaxTarget: c.healthFactorMaxTarget,
                 yieldFactorMax: c.yieldFactorMax,
                 yieldOracle: yieldOracle,
-                swapper: address(swap),
+                swapper: c.swapper,
                 admin: deployer,
                 recoveryDelay: c.recoveryDelay,
                 name: name,
