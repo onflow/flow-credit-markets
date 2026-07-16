@@ -8,8 +8,11 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 import {FCMVault, MORPHO} from "../src/FCMVault.sol";
-import {SwapLib} from "../src/libraries/SwapLib.sol";
+import {FlowSwapSwapper} from "../src/FlowSwapSwapper.sol";
+import {ISwapper} from "../src/interfaces/ISwapper.sol";
 import {Id, MarketParams, Position, Market} from "@morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "@morpho-blue/libraries/MarketParamsLib.sol";
 
@@ -52,6 +55,8 @@ contract FCMVaultTest is Test {
     MockOracle internal marketOracle;
     MockOracle internal yieldOracle;
     MockUniswapV3Pool internal yieldPool;
+    MockSwapRouter internal mockSwapRouter;
+    FlowSwapSwapper internal swapper;
 
     address internal admin = address(0x12345);
     address internal user = address(0xA11CE);
@@ -65,8 +70,10 @@ contract FCMVaultTest is Test {
         vm.etch(address(PYUSD0), erc20Code);
         vm.etch(address(FUSDEV), erc20Code);
         vm.etch(address(MORPHO), address(new MockMorpho()).code);
-        vm.etch(address(SwapLib.SWAP_ROUTER), address(new MockSwapRouter()).code);
         vm.etch(MOCK_IRM, address(new MockIrm()).code);
+
+        mockSwapRouter = new MockSwapRouter();
+        swapper = new FlowSwapSwapper(address(mockSwapRouter));
 
         marketOracle = new MockOracle(WETH_PRICE);
         yieldOracle = new MockOracle(YIELD_PRICE);
@@ -92,6 +99,7 @@ contract FCMVaultTest is Test {
                 healthFactorMaxTarget: HEALTH_FACTOR_MAX_TARGET,
                 yieldFactorMax: YIELD_FACTOR_MAX,
                 yieldOracle: address(yieldOracle),
+                swapper: address(swapper),
                 admin: admin,
                 recoveryDelay: 7 days,
                 name: "Flow Credit Markets WETH",
@@ -546,7 +554,7 @@ contract FCMVaultTest is Test {
 
         // Brutal swap fee: if deposit rebalanced to the midpoint HF it would borrow
         // ~474k PYUSD0, lose 99% to fees, and crater the vault NAV.
-        MockSwapRouter(address(SwapLib.SWAP_ROUTER)).setFeeBps(9_900);
+        mockSwapRouter.setFeeBps(9_900);
 
         uint256 navBefore = vault.totalAssets();
         uint256 healthBefore = _healthFactor();
@@ -887,8 +895,10 @@ contract FCMVaultTest is Test {
     ///      rate; the CPMM then governs the rebalance, honoring the
     ///      `sqrtPriceLimitX96` the vault derives from the oracle.
     function _installCpmmRouter(uint256 reserve) internal {
-        vm.etch(address(SwapLib.SWAP_ROUTER), address(new MockCpmmSwapRouter()).code);
-        MockCpmmSwapRouter r = MockCpmmSwapRouter(address(SwapLib.SWAP_ROUTER));
+        // Etch the CPMM mock over the same address the swapper already points at,
+        // so rebalance tests exercise price-impact swaps through it.
+        vm.etch(address(mockSwapRouter), address(new MockCpmmSwapRouter()).code);
+        MockCpmmSwapRouter r = MockCpmmSwapRouter(address(mockSwapRouter));
         r.setReserves(address(PYUSD0), reserve);
         r.setReserves(address(FUSDEV), reserve);
     }
@@ -1367,6 +1377,12 @@ contract FCMVaultTest is Test {
         vault.grantRole(role, account);
     }
 
+    function _allowFor(FCMVault v, address account) internal {
+        bytes32 role = v.EARLY_ACCESS_ROLE();
+        vm.prank(admin);
+        v.grantRole(role, account);
+    }
+
     function _disallow(address account) internal {
         bytes32 role = vault.EARLY_ACCESS_ROLE();
         vm.prank(admin);
@@ -1409,6 +1425,7 @@ contract FCMVaultTest is Test {
             healthFactorMaxTarget: HEALTH_FACTOR_MAX_TARGET,
             yieldFactorMax: YIELD_FACTOR_MAX,
             yieldOracle: address(yieldOracle),
+            swapper: address(swapper),
             admin: admin,
             recoveryDelay: 7 days,
             name: "x",
@@ -1678,7 +1695,7 @@ contract FCMVaultTest is Test {
         // output both round to zero: loanGot == 0, tripping the no-op guard.
         vm.prank(admin);
         dustVault.setMaxSlippageBps(9999);
-        MockSwapRouter(address(SwapLib.SWAP_ROUTER)).setFeeBps(9999);
+        mockSwapRouter.setFeeBps(9999);
 
         uint256 collBefore = WETH.balanceOf(address(MORPHO));
         dustVault.rebalance(); // must not revert
@@ -1729,7 +1746,7 @@ contract FCMVaultTest is Test {
         marketOracle.setPrice(1e36);
         _depositFor(user, 1 ether);
         MockERC20(address(FUSDEV)).mint(address(vault), FUSDEV.balanceOf(address(vault)) / 2);
-        MockSwapRouter(address(SwapLib.SWAP_ROUTER)).setFeeBpsForPool(FEE_ASSET_DEBT, 300);
+        mockSwapRouter.setFeeBpsForPool(FEE_ASSET_DEBT, 300);
 
         marketOracle.setPrice(0.82e36); // over-levered -> delever due
         uint256 hfBefore = _healthFactor();
@@ -2018,14 +2035,177 @@ contract FCMVaultTest is Test {
 
         assertGt(vault.balanceOf(feeRcpt), 0, "fee accrued via the redeemInKind path");
     }
+
+    // ---- swapper trust boundary -----------------------------------------
+
+    /// @notice Direct unit test: the lever-path trust check reverts when
+    ///         yieldReceived < minYieldOut.
+    function test_TrustCheck_LeverRevertsOnInsufficientYield() public {
+        // Deploy with honest swapper (doesn't matter — we call the check directly).
+        FCMVaultTrustHarness h = new FCMVaultTrustHarness(_baseParams());
+        uint256 additionalDebt = 1000 ether;
+        uint256 yieldBefore = 0;
+
+        // No yield received — should revert.
+        vm.expectRevert("swapper: insufficient output");
+        h.exposed_requireMinLeverOutput(additionalDebt, yieldBefore);
+    }
+
+    /// @notice Direct unit test: the delever-path trust check reverts when
+    ///         loanGot < minLoanOut.
+    function test_TrustCheck_DeleverRevertsOnInsufficientLoan() public {
+        FCMVaultTrustHarness h = new FCMVaultTrustHarness(_baseParams());
+
+        // Simulate: vault had 1000 yield before the swap, now has 0
+        // (the swapper consumed it) but received 0 loan.
+        uint256 loanBefore = 0;
+        uint256 yieldBefore = 1000 ether;
+
+        // Give the vault yield and immediately burn it so yieldAfter = 0.
+        address vaultAddr = address(h);
+        MockERC20(address(FUSDEV)).mint(vaultAddr, yieldBefore);
+        MockERC20(address(FUSDEV)).burn(vaultAddr, yieldBefore);
+
+        vm.expectRevert("swapper: insufficient output");
+        h.exposed_requireMinDeleverOutput(loanBefore, yieldBefore);
+    }
+
+    /// @notice A malicious swapper that returns only 1 wei of output while
+    ///         consuming all the input — a clear violation of the trust
+    ///         boundary. The vault must revert.
+    function test_Rebalance_DeleverRevertsWhenSwapperReturnsTooLittle() public {
+        // Deploy a vault with a malicious swapper.
+        MockMaliciousSwapper badSwapper =
+            new MockMaliciousSwapper({_honest: swapper, _yieldOracle: yieldOracle, _slippageBps: 100});
+        FCMVault.InitParams memory p = _baseParams();
+        p.swapper = address(badSwapper);
+        FCMVault badVault = new FCMVault(p);
+        vm.prank(admin);
+        badVault.setMaxTvl(1e21);
+
+        // Fund and deposit into the malicious-swaper vault.
+        MockERC20(address(WETH)).mint(user, 1 ether);
+        _allowFor(badVault, user);
+        vm.startPrank(user);
+        WETH.approve(address(badVault), 1 ether);
+        badVault.deposit(1 ether, user);
+        vm.stopPrank();
+
+        // Push HF below min → delever path.
+        marketOracle.setPrice(1700e36);
+
+        vm.expectRevert("swapper: insufficient output");
+        badVault.rebalance();
+    }
+
+    /// @notice Same malicious swapper on the lever path: the vault borrows,
+    ///         the swapper eats the loan token and returns yield just below
+    ///         the oracle-implied minimum. Must revert.
+    function test_Rebalance_LeverRevertsWhenSwapperReturnsTooLittle() public {
+        MockMaliciousSwapper badSwapper =
+            new MockMaliciousSwapper({_honest: swapper, _yieldOracle: yieldOracle, _slippageBps: 100});
+        FCMVault.InitParams memory p = _baseParams();
+        p.swapper = address(badSwapper);
+        FCMVault badVault = new FCMVault(p);
+        vm.prank(admin);
+        badVault.setMaxTvl(1e21);
+
+        MockERC20(address(WETH)).mint(user, 1 ether);
+        _allowFor(badVault, user);
+        vm.startPrank(user);
+        WETH.approve(address(badVault), 1 ether);
+        badVault.deposit(1 ether, user);
+        vm.stopPrank();
+
+        // Push HF above max → lever path.
+        marketOracle.setPrice(2300e36);
+
+        vm.expectRevert("swapper: insufficient output");
+        badVault.rebalance();
+    }
 }
 
 /// @dev Exposes the vault's internal price-limit math so the security-critical
 ///      oracle -> `sqrtPriceLimitX96` conversion can be asserted directly.
+/// @dev Harness that exposes the trust-boundary checks for direct testing.
+contract FCMVaultTrustHarness is FCMVault {
+    constructor(FCMVault.InitParams memory p) FCMVault(p) {}
+
+    function exposed_requireMinLeverOutput(uint256 additionalDebt, uint256 yieldBefore) external view {
+        _requireMinLeverOutput(additionalDebt, yieldBefore);
+    }
+
+    function exposed_requireMinDeleverOutput(uint256 loanBefore, uint256 yieldBefore) external view {
+        _requireMinDeleverOutput(loanBefore, yieldBefore);
+    }
+}
+
 contract FCMVaultHarness is FCMVault {
     constructor(FCMVault.InitParams memory p) FCMVault(p) {}
 
     function exposed_yieldDebtSwapLimit(address tokenIn) external view returns (uint160, bool) {
         return _yieldDebtSwapLimit(tokenIn);
+    }
+}
+
+/// @dev Malicious swapper that eats all input tokens on `swapExactInToLimit`
+///      and returns exactly 1 wei less than the oracle-implied minimum — the
+///      vault's trust-boundary check must catch this sub-threshold output.
+///      Other swap methods delegate to a real FlowSwapSwapper so deposit/redeem
+///      flows work.
+contract MockMaliciousSwapper is ISwapper {
+    using SafeERC20 for IERC20;
+
+    FlowSwapSwapper internal immutable honest;
+    MockOracle internal immutable yieldOracle;
+    uint256 internal immutable slippageBps;
+
+    uint256 internal constant BPS = 10_000;
+    uint256 internal constant ORACLE_PRICE_SCALE = 1e36;
+
+    constructor(FlowSwapSwapper _honest, MockOracle _yieldOracle, uint256 _slippageBps) {
+        honest = _honest;
+        yieldOracle = _yieldOracle;
+        slippageBps = _slippageBps;
+    }
+
+    function swapExactIn(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn)
+        external
+        returns (uint256 amountOut)
+    {
+        IERC20(tokenIn).safeTransfer(address(honest), amountIn);
+        amountOut = honest.swapExactIn(tokenIn, tokenOut, fee, amountIn);
+        IERC20(tokenOut).safeTransfer(msg.sender, amountOut);
+    }
+
+    function swapExactInToLimit(address tokenIn, address tokenOut, uint24, uint256, uint160)
+        external
+        returns (uint256)
+    {
+        // Eat all input, return exactly 1 wei less than the oracle-implied
+        // minimum the vault will accept (lowest of both rate directions).
+        uint256 spent = IERC20(tokenIn).balanceOf(address(this));
+        uint256 yieldPrice = yieldOracle.price();
+        // Lever direction: loan→yield, min = spent * 1e36 / yieldPrice * (1-slip)
+        // Delever direction: yield→loan, min = spent * yieldPrice / 1e36 * (1-slip)
+        uint256 minOut = spent * yieldPrice / ORACLE_PRICE_SCALE * (BPS - slippageBps) / BPS;
+        if (yieldPrice > 0) {
+            uint256 alt = spent * ORACLE_PRICE_SCALE / yieldPrice * (BPS - slippageBps) / BPS;
+            if (alt < minOut) minOut = alt;
+        }
+        uint256 output = minOut > 1 ? minOut - 1 : 0;
+        MockERC20(tokenOut).mint(msg.sender, output);
+        return output;
+    }
+
+    function swapExactOut(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint256 maxAmountIn)
+        external
+        returns (uint256 amountIn)
+    {
+        IERC20(tokenIn).safeTransfer(address(honest), maxAmountIn);
+        amountIn = honest.swapExactOut(tokenIn, tokenOut, fee, amountOut, maxAmountIn);
+        IERC20(tokenOut).safeTransfer(msg.sender, amountOut);
+        uint256 unspent = IERC20(tokenIn).balanceOf(address(this));
+        if (unspent > 0) IERC20(tokenIn).safeTransfer(msg.sender, unspent);
     }
 }

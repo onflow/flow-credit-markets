@@ -16,7 +16,7 @@ import {IMorphoFlashLoanCallback} from "@morpho-blue/interfaces/IMorphoCallbacks
 import {IOracle} from "@morpho-blue/interfaces/IOracle.sol";
 
 import {MarketLib} from "./libraries/MarketLib.sol";
-import {SwapLib} from "./libraries/SwapLib.sol";
+import {ISwapper} from "./interfaces/ISwapper.sol";
 import {IUniswapV3Pool} from "./interfaces/IUniswapV3Pool.sol";
 
 // Morpho Blue singleton address for Flow EVM
@@ -111,6 +111,12 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
     ///      We will deploy an oracle instance, which will provide the best available price information
     ///      for the given token. This may be a 3rd party oracle, onchain price information, or both.
     address public immutable yieldOracle;
+
+    /// @notice Swapper contract that executes all swaps on behalf of the vault.
+    ///         The vault transfers tokens to the swapper before each call and
+    ///         measures its own balance deltas afterward — the swapper is NOT
+    ///         trusted to self-report, only to deliver tokens.
+    ISwapper public immutable swapper;
 
     MarketParams public market;
 
@@ -227,6 +233,7 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         uint256 healthFactorMaxTarget;
         uint256 yieldFactorMax;
         address yieldOracle;
+        address swapper;
         address admin;
         uint256 recoveryDelay;
         string name;
@@ -297,6 +304,7 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         require(p.healthFactorMaxTarget <= p.healthFactorMax, "HF maxTarget > max");
         require(p.yieldFactorMax >= MarketLib.WAD, "yieldFactorMax < WAD");
         require(p.yieldDebtPool != address(0), "yieldDebtPool zero");
+        require(p.swapper != address(0), "swapper zero");
 
         loanToken = p.loanToken;
         yieldToken = p.yieldToken;
@@ -309,6 +317,7 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         healthFactorMaxTarget = p.healthFactorMaxTarget;
         yieldFactorMax = p.yieldFactorMax;
         yieldOracle = p.yieldOracle;
+        swapper = ISwapper(p.swapper);
 
         market = MarketParams({
             loanToken: address(p.loanToken),
@@ -321,10 +330,6 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         uint256 maxAllowance = type(uint256).max;
         p.collateral.forceApprove(address(MORPHO), maxAllowance);
         p.loanToken.forceApprove(address(MORPHO), maxAllowance);
-        p.loanToken.forceApprove(address(SwapLib.SWAP_ROUTER), maxAllowance);
-        p.yieldToken.forceApprove(address(SwapLib.SWAP_ROUTER), maxAllowance);
-        // redeem's Case-B flash sells collateral for the debt shortfall.
-        p.collateral.forceApprove(address(SwapLib.SWAP_ROUTER), maxAllowance);
 
         recoveryDelay = p.recoveryDelay;
         maxSlippageBps = 100; // 1% default; admin retunes per pool depth.
@@ -581,8 +586,9 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         uint256 toBorrow = _targetBorrowAgainst(assets);
         if (toBorrow > 0) {
             market.borrow(toBorrow);
-            // slither-disable-next-line unused-return -> swap output is measured via the totalAssets() delta below, not this return
-            SwapLib.swapExactIn(address(loanToken), address(yieldToken), feeYieldDebt, toBorrow);
+            loanToken.safeTransfer(address(swapper), toBorrow);
+            // slither-disable-next-line unused-return -> output is measured via the totalAssets() delta below; swapper return not trusted
+            swapper.swapExactIn(address(loanToken), address(yieldToken), feeYieldDebt, toBorrow);
         }
 
         // the depositor's contribution to NAV, denominated in outer vault assets
@@ -694,8 +700,9 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         uint256 yieldOut = yieldToken.balanceOf(address(this)).mulDiv(shares, claims);
         uint256 loanBefore = loanToken.balanceOf(address(this));
         if (yieldOut > 0) {
-            // slither-disable-next-line unused-return -> loanGot is measured from the loanToken balance delta below, not this return
-            SwapLib.swapExactIn(address(yieldToken), address(loanToken), feeYieldDebt, yieldOut);
+            yieldToken.safeTransfer(address(swapper), yieldOut);
+            // slither-disable-next-line unused-return -> loanGot is measured from the loanToken balance delta below, not the swapper return
+            swapper.swapExactIn(address(yieldToken), address(loanToken), feeYieldDebt, yieldOut);
         }
         uint256 loanGot = loanToken.balanceOf(address(this)) - loanBefore;
 
@@ -709,8 +716,9 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
             if (collSlice > 0) market.withdrawCollateral(collSlice);
             uint256 surplus = loanGot - debtSlice;
             if (surplus > 0) {
-                // slither-disable-next-line unused-return -> surplus-swap output is captured by the redeem balance delta, not this return
-                SwapLib.swapExactIn(address(loanToken), asset(), feeAssetDebt, surplus);
+                loanToken.safeTransfer(address(swapper), surplus);
+                // slither-disable-next-line unused-return -> output is captured by the redeem asset balance delta, not the swapper return
+                swapper.swapExactIn(address(loanToken), asset(), feeAssetDebt, surplus);
             }
         } else {
             // Case B: the yield sale (loanGot) fell short of the pro-rata debt
@@ -744,8 +752,9 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         market.withdrawCollateral(collSlice);
         // Sell collateral for exactly `shortfall` loan token to repay the flash,
         // spending at most the withdrawn slice; the rest stays for the redeemer.
-        // slither-disable-next-line unused-return -> collateral spent is captured by the redeem balance delta, not this return
-        SwapLib.swapExactOut(asset(), address(loanToken), feeAssetDebt, shortfall, collSlice);
+        IERC20(asset()).safeTransfer(address(swapper), collSlice);
+        // slither-disable-next-line unused-return -> collateral spent is captured by the redeem asset balance delta, not the swapper return
+        swapper.swapExactOut(asset(), address(loanToken), feeAssetDebt, shortfall, collSlice);
     }
 
     /// @notice Escape hatch — swap-free, in-kind redemption: the caller
@@ -892,6 +901,37 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
     ///                    second `MORPHO.position` SLOAD).
     /// @return additionalDebt Net new debt taken on in this call (the loan token
     ///                    actually swapped into yield; 0 if nothing filled).
+
+    /// @dev Trust-boundary check for the lever path: the swapper must deliver at
+    ///      least the oracle-implied minimum yield (discounted by maxSlippageBps)
+    ///      for the loan it consumed.
+    function _requireMinLeverOutput(uint256 additionalDebt, uint256 yieldBefore) internal view {
+        // slither-disable-next-line incorrect-equality -> exact-zero guard: nothing to check when no debt was consumed by the swap
+        if (additionalDebt == 0) return;
+        uint256 yieldReceived = yieldToken.balanceOf(address(this)) - yieldBefore;
+        uint256 yieldPrice = IOracle(yieldOracle).price();
+        uint256 minYieldOut =
+            additionalDebt.mulDiv(MarketLib.ORACLE_PRICE_SCALE, yieldPrice).mulDiv(BPS - maxSlippageBps, BPS);
+        require(yieldReceived >= minYieldOut, "swapper: insufficient output");
+    }
+
+    /// @dev Trust-boundary check for the delever/harvest path: the swapper must
+    ///      deliver at least the oracle-implied minimum loan (discounted by
+    ///      maxSlippageBps) for the yield it consumed. Both input consumed and
+    ///      output received are measured from the vault's own balance deltas —
+    ///      the swapper's return value is never trusted.
+    function _requireMinDeleverOutput(uint256 loanBefore, uint256 yieldBefore) internal view {
+        uint256 yieldAfter = yieldToken.balanceOf(address(this));
+        uint256 yieldSpent = yieldBefore - yieldAfter;
+        // slither-disable-next-line incorrect-equality -> exact-zero guard: nothing to check when no yield was consumed by the swap
+        if (yieldSpent == 0) return;
+        uint256 loanGot = loanToken.balanceOf(address(this)) - loanBefore;
+        uint256 yieldPrice = IOracle(yieldOracle).price();
+        uint256 minLoanOut =
+            yieldSpent.mulDiv(yieldPrice, MarketLib.ORACLE_PRICE_SCALE).mulDiv(BPS - maxSlippageBps, BPS);
+        require(loanGot >= minLoanOut, "swapper: insufficient output");
+    }
+
     function _rebalanceLever(uint256 maxBorrow, uint256 currentDebt) internal returns (uint256 additionalDebt) {
         uint256 targetDebt = maxBorrow.mulDiv(MarketLib.WAD, healthFactorMaxTarget);
         if (targetDebt <= currentDebt) return 0;
@@ -905,15 +945,18 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         // stays with the vault and is repaid below, so we only lever by the
         // amount actually converted to yield.
         uint256 loanBefore = loanToken.balanceOf(address(this));
+        uint256 yieldBefore = yieldToken.balanceOf(address(this));
         market.borrow(borrowAmount);
-        // slither-disable-next-line unused-return -> levered amount is measured via the loanToken balance delta below, not this return
-        SwapLib.swapExactInToLimit(address(loanToken), address(yieldToken), feeYieldDebt, borrowAmount, limit);
+        loanToken.safeTransfer(address(swapper), borrowAmount);
+        // slither-disable-next-line unused-return -> yield received is measured from the yieldToken balance delta below; swapper return not trusted
+        swapper.swapExactInToLimit(address(loanToken), address(yieldToken), feeYieldDebt, borrowAmount, limit);
 
         // Repay the loan token the swap left behind, so no idle loan lingers.
         uint256 leftover = loanToken.balanceOf(address(this)) - loanBefore;
         // slither-disable-next-line unused-return -> repay amount is known (leftover); Morpho reverts on failure
         if (leftover > 0) market.repay(leftover);
         additionalDebt = borrowAmount - leftover;
+        _requireMinLeverOutput(additionalDebt, yieldBefore);
     }
 
     /// @dev Delever branch of `rebalance`: position is over-levered
@@ -961,11 +1004,12 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         (uint160 limit, bool ok) = _yieldDebtSwapLimit(address(yieldToken));
         if (!ok) return 0; // pool already past the slippage bound — no-op.
 
-        // Sell yield->loan bounded by the price limit. The pool partial-fills
-        // up to it, so a too-large delever still repays as much as the bound
-        // allows.
-        uint256 loanGot =
-            SwapLib.swapExactInToLimit(address(yieldToken), address(loanToken), feeYieldDebt, yieldToSell, limit);
+        uint256 loanBefore = loanToken.balanceOf(address(this));
+        yieldToken.safeTransfer(address(swapper), yieldToSell);
+        // slither-disable-next-line unused-return -> loanGot is measured from the balance delta below, not the swapper's return
+        swapper.swapExactInToLimit(address(yieldToken), address(loanToken), feeYieldDebt, yieldToSell, limit);
+        _requireMinDeleverOutput(loanBefore, yieldBalance);
+        uint256 loanGot = loanToken.balanceOf(address(this)) - loanBefore;
 
         // Cap repayment at outstanding debt
         repaid = loanGot > currentDebt ? currentDebt : loanGot;
@@ -1012,8 +1056,13 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         // or blocks the delever leg. Same mechanism as `_rebalanceDelever`.
         (uint160 limit, bool ok) = _yieldDebtSwapLimit(address(yieldToken));
         if (!ok) return;
-        uint256 loanGot =
-            SwapLib.swapExactInToLimit(address(yieldToken), address(loanToken), feeYieldDebt, yieldToHarvest, limit);
+        uint256 loanBefore = loanToken.balanceOf(address(this));
+        yieldToken.safeTransfer(address(swapper), yieldToHarvest);
+        // slither-disable-next-line unused-return -> loanGot is measured from the loanToken balance delta below; swapper return not trusted
+        swapper.swapExactInToLimit(address(yieldToken), address(loanToken), feeYieldDebt, yieldToHarvest, limit);
+        _requireMinDeleverOutput(loanBefore, yieldBalance);
+        uint256 loanGot = loanToken.balanceOf(address(this)) - loanBefore;
+
         // A dust surplus (or a pool already at the bound) rounds the swap output to
         // zero; no-op rather than pass a zero amount to the next leg, which the router
         // and Morpho reject.
@@ -1022,7 +1071,8 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
 
         // Leg 2: loan -> collateral on the asset/debt pool -- the same unbounded swap
         // the redeem surplus reconciliation uses.
-        uint256 collateralAdded = SwapLib.swapExactIn(address(loanToken), asset(), feeAssetDebt, loanGot);
+        loanToken.safeTransfer(address(swapper), loanGot);
+        uint256 collateralAdded = swapper.swapExactIn(address(loanToken), asset(), feeAssetDebt, loanGot);
         // slither-disable-next-line incorrect-equality -> exact-zero guard: nothing realized, skip
         if (collateralAdded == 0) return;
 

@@ -5,7 +5,6 @@ import {console} from "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {SwapLib} from "../src/libraries/SwapLib.sol";
 import {ISwapRouter} from "../src/interfaces/ISwapRouter.sol";
 import {IUniswapV3Pool} from "../src/interfaces/IUniswapV3Pool.sol";
 import {ConfiguredScript, IUniswapV3Factory} from "./ConfiguredScript.s.sol";
@@ -69,9 +68,8 @@ contract SwapForWeth is ConfiguredScript {
         // 1. Wrap native FLOW -> WFLOW (credited to the broadcaster).
         WFLOW.deposit{value: amountIn}();
         // 2. Approve the router and swap WFLOW -> WETH back to the broadcaster.
-        WFLOW.approve(address(SwapLib.SWAP_ROUTER), amountIn);
-        uint256 received = SwapLib.SWAP_ROUTER
-            .exactInputSingle(
+        WFLOW.approve(c.swapRouter, amountIn);
+        uint256 received = ISwapRouter(c.swapRouter).exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
                     tokenIn: address(WFLOW),
                     tokenOut: weth,

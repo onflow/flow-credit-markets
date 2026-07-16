@@ -5,9 +5,9 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {FCMVault, MORPHO} from "../src/FCMVault.sol";
+import {FlowSwapSwapper} from "../src/FlowSwapSwapper.sol";
 import {ERC4626, IERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {SwapLib} from "../src/libraries/SwapLib.sol";
 
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockMorpho} from "./mocks/MockMorpho.sol";
@@ -60,8 +60,10 @@ contract TvlLimitTest is Test {
         vm.etch(address(PYUSD0), erc20Code);
         vm.etch(address(FUSDEV), erc20Code);
         vm.etch(address(MORPHO), address(new MockMorpho()).code);
-        vm.etch(address(SwapLib.SWAP_ROUTER), address(new MockSwapRouter()).code);
         vm.etch(MOCK_IRM, address(new MockIrm()).code);
+
+        MockSwapRouter mockSwapRouter = new MockSwapRouter();
+        FlowSwapSwapper swapper = new FlowSwapSwapper(address(mockSwapRouter));
 
         marketOracle = new MockOracle(WETH_PRICE);
         yieldOracle = new MockOracle(YIELD_PRICE);
@@ -83,6 +85,7 @@ contract TvlLimitTest is Test {
                 healthFactorMaxTarget: HEALTH_FACTOR_MAX_TARGET,
                 yieldFactorMax: YIELD_FACTOR_MAX,
                 yieldOracle: address(yieldOracle),
+                swapper: address(swapper),
                 admin: admin,
                 recoveryDelay: 7 days,
                 name: "Flow Credit Markets WETH",

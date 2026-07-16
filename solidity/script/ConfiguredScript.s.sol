@@ -41,6 +41,7 @@ abstract contract ConfiguredScript is Script {
         uint256 yieldFactorMax;
         address yieldOracle;
         address swapFactory;
+        address swapRouter;
         address yieldDebtPool;
         uint256 recoveryDelay;
     }
@@ -69,6 +70,7 @@ abstract contract ConfiguredScript is Script {
         c.yieldFactorMax = vm.parseTomlUint(toml, ".yieldFactorMax");
         c.yieldOracle = vm.parseTomlAddress(toml, ".yieldOracle");
         c.swapFactory = vm.parseTomlAddress(toml, ".swapFactory");
+        c.swapRouter = vm.parseTomlAddress(toml, ".swapRouter");
         c.yieldDebtPool = vm.parseTomlAddress(toml, ".yieldDebtPool");
         c.recoveryDelay = vm.parseTomlUint(toml, ".recoveryDelay");
     }
