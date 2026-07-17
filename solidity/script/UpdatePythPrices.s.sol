@@ -2,11 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
-
-interface IPyth {
-    function getUpdateFee(bytes[] calldata updateData) external view returns (uint256);
-    function updatePriceFeeds(bytes[] calldata updateData) external payable;
-}
+import {IPyth} from "@pythnetwork/pyth-sdk-solidity/IPyth.sol";
 
 interface IOracle {
     function price() external view returns (uint256);

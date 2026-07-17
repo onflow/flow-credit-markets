@@ -8,6 +8,7 @@ optimizer_runs = 200
 remappings = [
     "@openzeppelin/=lib/openzeppelin-contracts/",
     "@morpho-blue/=lib/morpho-blue/src/",
+    "@pythnetwork/pyth-sdk-solidity/=lib/pyth-sdk-solidity/",
     "yearn-erc4626-router/=lib/Yearn-ERC4626-Router/src/",
     "forge-std/=lib/forge-std/src/",
 ]
@@ -17,6 +18,11 @@ fs_permissions = [{ access = "read", path = "./deployments" }]
 flow_mainnet = "https://mainnet.evm.nodes.onflow.org"
 
 [fmt]
+line_length = 100
+tab_width = 4
+
+# CI runs with FOUNDRY_PROFILE=ci; profiles don't inherit [fmt], so mirror it.
+[profile.ci.fmt]
 line_length = 100
 tab_width = 4
 
