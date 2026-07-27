@@ -17,19 +17,23 @@ import {MockOracle} from "./mocks/MockOracle.sol";
 ///         dilution of existing holders. Each test isolates the effect via a counterfactual
 ///         (act on the mispriced mark vs. the fresh mark).
 ///
-///         Coverage — a decision tree over the booked-vs-fresh gap Δ (not a flat list). The bound is
-///         source-agnostic (§2), so each source and each amplification axis is tested once. Manufacture /
-///         real-pool games live in StalePriceArbManipulation.t.sol.
+///         Coverage — a decision tree over the booked-vs-fresh gap Δ (not a flat list). The SIZE bound is
+///         source-agnostic (§2), so it's tested once; the REPETITION bound is NOT source-agnostic — it
+///         saturates for source-specific reasons (Pc: carry is Pc-independent; Py: redeem reads no oracle,
+///         A1) — so it's tested per source. Manufacture / real-pool games live in StalePriceArbManipulation.
 ///           A. Anything to extract?   Core_BalancedNoExtraction          Δ=0 / k=1 ⇒ ~0 (baseline)
 ///           B. Bounded, per SOURCE?   Core_LossWithinStalenessGap (fuzz)     Pc stale-high (Δ>0): loss ≤ δ, never principal, zero-sum
 ///                                     Core_OverMarkUnprofitable (fuzz)       Pc stale-low (Δ<0): deposit overpays, edge ≤ 0
+///                                     Core_YieldOverMarkUnprofitable         Py mark stale-high: overpays too (over-mark is source-agnostic - checked)
 ///                                     Source_YieldDivergenceWithinGap (fuzz) Py mark-vs-DEX gap: harm ≤ gap (both dirs)
 ///                                     Source_CombinedWithinComposedGap (fuzz) Pc + Py at once: bounds compose, no blow-up
 ///           C. Amplifiable, per AXIS? Core_ProfitConcaveInSize           size: interior max, then negative, peak < 1 WETH
-///                                     Repetition_OscillationDoesNotCompound  time: jitter saturates, no compounding
-///                                     Repetition_YieldRegenTaxNotPrincipal   time: long-horizon regen, δ-tax on yield, never principal
+///                                     Repetition_CollateralOscillationDoesNotCompound time: Pc jitter saturates (carry Pc-independent)
+///                                     Repetition_YieldOscillationDoesNotCompound      time: Py mark jitter saturates (redeem oracle-free, A1)
+///                                     Repetition_YieldRegenTaxNotPrincipal            time: real up-trend, δ-tax on yield, never principal
 ///                                     Core_PastCapExitReverts            past the leverage cap: no exit completes
 ///                                     Core_RebalanceDoesNotAmplify       interposed rebalance(): amplification = 0
+///                                     Core_RebalanceDoesNotAmplifyYieldGap  same on a yield gap (source-agnostic - checked)
 ///           D. Manufacturable?        (StalePriceArbManipulation.t.sol) Manufacture_SelfExtractionUnprofitable       net < 0
 ///                                     (StalePriceArbManipulation.t.sol) Exit_InKindFloorsDepressedRedeem (fuzz)      bystander escapes in-kind ≥ redeem
 ///           E. Exit / controls sound? Exit_InKindEqualsRedeem            in-kind == redeem (same rate) → A1
@@ -173,7 +177,7 @@ contract StalePriceArbTest is StalePriceArbBase {
     ///         so net PnL rises to an interior maximum (~0.98 WETH at ~100 WETH) then falls negative.
     ///         The unimodality is the closed-form concavity argument (doc §2); these 4 points only
     ///         sample the curve to confirm the sign. The time axis (repetition) is bounded separately
-    ///         by test_Repetition_OscillationDoesNotCompound.
+    ///         by the test_Repetition_*OscillationDoesNotCompound tests (collateral + yield).
     function test_Core_ProfitConcaveInSize() public {
         uint256 small = 10 ether;
         uint256 opt = 100 ether;
@@ -432,12 +436,13 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertLe(harmBps, gapBps + 2, "honest harm exceeds the DEX-execution divergence");
     }
 
-    /// @notice Oracle JITTER does not compound. If `Pc` bounces stale(2000)↔fresh(1800) and the
-    ///         attacker sandwiches each swing, the drain SATURATES — it does not stack per bounce —
-    ///         because the extractable pot is the standing carry (a fixed quantity) that price swings
-    ///         do not refill; only fresh accrued yield does. Asserts no per-round acceleration
-    ///         (last ≤ first), cumulative within ~2× one event, and principal preserved throughout.
-    function test_Repetition_OscillationDoesNotCompound() public {
+    /// @notice COLLATERAL-axis oscillation does not compound. If `Pc` bounces stale(2000)↔fresh(1800)
+    ///         and the attacker sandwiches each swing, the drain SATURATES — it does not stack per
+    ///         bounce — because the carry is `Pc`-INDEPENDENT (`G = Y·Py − D`), so a swing re-marks the
+    ///         same fixed pot and injects nothing. Asserts no per-round acceleration (last ≤ first),
+    ///         cumulative within ~2× one event, and principal preserved. (Yield-axis twin below saturates
+    ///         too, but for a different reason — see it.)
+    function test_Repetition_CollateralOscillationDoesNotCompound() public {
         MockSwapRouter router = _pricedDex(1800e36, 1e18);
         _deposit(honest, 10 ether);
         uint256 kWad = 1.5e18; // carry so an edge exists each swing
@@ -465,6 +470,121 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertLe(lastExtraction, firstExtraction, "extraction accelerates across bounces (compounds)");
         assertLe(cumulativeLoss, 2 * uint256(firstExtraction), "jitter drain accumulates instead of saturating");
         assertGe(endClaim, 10 ether, "jitter drain reached principal");
+    }
+
+    /// @notice YIELD-axis oscillation does not compound — the twin of the collateral case, and the one
+    ///         the suite was missing. The yield *mark* (`yieldOracle`) jitters stale-low↔true each round
+    ///         while the true realization value (the DEX rate) is held FIXED, and the attacker sandwiches
+    ///         each dip. It saturates too — but NOT because the carry is source-independent (it isn't; the
+    ///         carry IS the yield mark's value). It saturates because redeem reads no oracle (A1): a
+    ///         wobbling mark can only mis-price the MINT, the skim comes out of the carry and telescopes,
+    ///         so taking the gap closes it. A genuine *true-value* de-peg down-move is a different animal
+    ///         (credit risk, out of scope — §7); here the realization is pinned, so only the mark moves.
+    function test_Repetition_YieldOscillationDoesNotCompound() public {
+        uint256 kTrue = 1.5e18; // true yield value — held FIXED (stable realization)
+        uint256 kStale = 1.35e18; // the mark reads ~10% low when "stale" (under-marks NAV → over-issue)
+        MockSwapRouter router = _pricedDex(1800e36, 1e18);
+        _deposit(honest, 10 ether);
+        // Realization (DEX) pinned at the true value; Pc fresh & fixed — isolate the yield mark.
+        router.setRate(address(FUSDEV), address(PYUSD0), kTrue);
+        router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / kTrue);
+        marketOracle.setPrice(1800e36);
+
+        uint256 inAmt = 1000 ether;
+        uint256 rounds = 10;
+        yieldOracle.setPrice(kTrue * 1e18);
+        uint256 baseline = _honestClaim();
+        int256 firstExtraction;
+        int256 lastExtraction;
+        for (uint256 i = 0; i < rounds; i++) {
+            yieldOracle.setPrice(kStale * 1e18); // mark jitters stale-low → NAV under-marked
+            uint256 s = _deposit(attacker, inAmt);
+            yieldOracle.setPrice(kTrue * 1e18); // mark back to true
+            int256 pnl = int256(_redeem(attacker, s)) - int256(inAmt);
+            if (i == 0) firstExtraction = pnl;
+            if (i == rounds - 1) lastExtraction = pnl;
+        }
+        uint256 endClaim = _honestClaim();
+        uint256 cumulativeLoss = baseline > endClaim ? baseline - endClaim : 0;
+        emit log_named_int("yield-jitter first extraction (wei)", firstExtraction);
+        emit log_named_int("yield-jitter last  extraction (wei)", lastExtraction);
+        emit log_named_uint("yield-jitter cumulative honest loss over 10 rounds (wei)", cumulativeLoss);
+
+        assertGt(firstExtraction, 0, "setup no longer extracts in round 1; saturation bound vacuous");
+        assertLe(lastExtraction, firstExtraction, "yield-mark jitter extraction accelerates (compounds)");
+        assertLe(cumulativeLoss, 2 * uint256(firstExtraction), "yield-jitter drain accumulates instead of saturating");
+
+        // Principal floor on a REALIZED redeem (oracle-free, A1) — the mark that jittered can't mask it.
+        uint256 realized = _redeem(honest, vault.balanceOf(honest));
+        emit log_named_uint("yield-jitter honest realized (WETH wei; principal = 10e18)", realized);
+        assertGe(realized, 10 ether - 2, "yield-jitter drain reached principal");
+    }
+
+    /// @notice Yield twin of Core_OverMarkUnprofitable (which is on the collateral axis). The OPPOSITE
+    ///         yield-mark direction — mark stale-HIGH, NAV over-marked — is defender-favorable, not a second
+    ///         attack. NOT obvious a priori: the yield leg is *bought* at the DEX while *booked* at the mark
+    ///         (an interaction the collateral leg lacks), so this verifies the over-mark result actually
+    ///         transfers to the yield axis rather than assuming it. Attacker deposits at the over-marked mark
+    ///         (under-issued → overpays), redeems at true; edge ≤ 0, honest unharmed.
+    function test_Core_YieldOverMarkUnprofitable() public {
+        uint256 kTrue = 1.5e18;
+        uint256 kHigh = 1.65e18; // mark reads ~10% HIGH → over-marks NAV → under-issue → overpay
+        MockSwapRouter router = _pricedDex(1800e36, 1e18);
+        _deposit(honest, 10 ether);
+        router.setRate(address(FUSDEV), address(PYUSD0), kTrue);
+        router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / kTrue);
+        marketOracle.setPrice(1800e36);
+        yieldOracle.setPrice(kTrue * 1e18);
+        uint256 baseline = _honestClaim();
+
+        yieldOracle.setPrice(kHigh * 1e18); // over-mark the yield
+        uint256 s = _deposit(attacker, 1000 ether);
+        yieldOracle.setPrice(kTrue * 1e18); // back to true
+        int256 edge = int256(_redeem(attacker, s)) - int256(1000 ether);
+        uint256 honestAfter = _honestClaim();
+
+        emit log_named_int("yield over-mark attacker edge (wei)", edge);
+        assertLe(edge, int256(baseline / 1000), "yield over-mark direction extracted value");
+        assertGe(honestAfter, baseline - baseline / 1000, "yield over-mark direction harmed honest holders");
+    }
+
+    /// @notice Yield twin of Core_RebalanceDoesNotAmplify (which interposes a rebalance in a Pc-gap
+    ///         straddle). Interposing rebalance() in a YIELD-gap straddle doesn't amplify either. NOT
+    ///         obvious: the rebalance swap floor reads the yield oracle (the delever-brick regime), so a
+    ///         rebalance under a stale yield mark hits a different limit than under a stale Pc — this
+    ///         verifies the no-amplify result transfers rather than assuming it.
+    function test_Core_RebalanceDoesNotAmplifyYieldGap() public {
+        uint256 kTrue = 1.5e18;
+        uint256 kStale = 1.35e18; // stale-low mark → over-issue → a real yield gap to (try to) amplify
+        MockSwapRouter router = _pricedDex(1800e36, 1e18);
+        _deposit(honest, 10 ether);
+        router.setRate(address(FUSDEV), address(PYUSD0), kTrue);
+        router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / kTrue);
+        marketOracle.setPrice(1800e36);
+        yieldOracle.setPrice(kTrue * 1e18);
+
+        uint256 inAmt = 1000 ether;
+        uint256 snap = vm.snapshotState();
+
+        // Plain: yield-gap straddle, no rebalance.
+        yieldOracle.setPrice(kStale * 1e18);
+        uint256 s = _deposit(attacker, inAmt);
+        yieldOracle.setPrice(kTrue * 1e18);
+        int256 piPlain = int256(_redeem(attacker, s)) - int256(inAmt);
+        assertGt(piPlain, 0, "no yield gap to amplify - bound vacuous");
+        vm.revertToState(snap);
+
+        // Rebalance interposed while the yield mark is stale.
+        yieldOracle.setPrice(kStale * 1e18);
+        s = _deposit(attacker, inAmt);
+        vault.rebalance();
+        yieldOracle.setPrice(kTrue * 1e18);
+        int256 piReb = int256(_redeem(attacker, s)) - int256(inAmt);
+        uint256 honestAfter = _honestClaim();
+
+        emit log_named_int("yield-gap amplification (wei)", piReb - piPlain);
+        assertLe(piReb, piPlain + 2, "rebalance amplified yield-gap extraction");
+        assertGe(honestAfter, 10 ether - 2, "rebalance-in-yield-gap reached principal");
     }
 
     /// @notice Long-horizon REGENERATION variant of the oscillation test: real yield accrues each round,
