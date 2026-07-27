@@ -114,9 +114,9 @@ by the gap:
 - **Discount** (DEX < mark): the attacker's yield is over-booked, so they over-mint and dilute holders.
 
 Both are fuzzed (discount to 90%, premium to +100%) in `Source_YieldDivergenceWithinGap`, which caps
-honest harm at the gap. The mark only ratchets up, so the one pure-timing play — an appreciation sandwich —
-is bounded by that same gap; and FUSDEV's mark can't jump anyway (`convertToAssets`, a rate-limited Morpho
-Vault V2), so there's no sandwichable step, modulo the `yieldOracle` tracking it (§7).
+honest harm at the gap. The one pure-timing play — an appreciation sandwich — is bounded by that same gap
+regardless; and `convertToAssets` can't jump *from accrual* (it's rate-limited), so accrual leaves no
+sandwichable step, modulo the `yieldOracle` tracking it (§7).
 
 **Manufacturing a gap doesn't pay — self-extraction loses, and a bystander can opt out.** The mark isn't
 tradeable (it's `convertToAssets`, not the pool), so the only lever is pushing the DEX pool — which costs the
@@ -138,8 +138,8 @@ that holds on every single cycle** (A5): each `Δ` misprices only the carry, so 
 principal axis for repetition to walk. What's left is the cumulative *carry* loss, and it splits cleanly.
 
 **Price motion only depletes the pot.** The extractable pot is the *standing* carry. Each skim takes a
-fraction `f·c < 1` of the current mispriced carry and settles the rest at true price — **taking the gap
-closes it** — and the pot does not refill, so the series telescopes and **saturates** at ≤ the standing carry.
+fraction (`< 1`) of the current mispriced carry and settles the rest at true price — **taking the gap
+closes it** — and the pot does not refill, so the series telescopes to ≤ the standing carry.
 This holds on **both** oracle axes, for *different* reasons: a `Pc` move re-marks a `Pc`-**independent** carry
 (`G = Y·Py − D`), injecting nothing; a yield-**mark** wobble only mis-prices the *mint* — redeem reads no
 oracle (A1) — so each skim depletes a pot the wobble can't refill.
@@ -156,10 +156,11 @@ envelope — Coverage below)
 
     Σ πᵢ  ≤  (standing carry at t₀)  +  δ̄ · (real yield accrued),
 
-a δ-fraction of the yield the vault genuinely earned — unbounded over infinite time only because cumulative
-yield is, and never a fraction of principal. Debt interest only *shrinks* the pot (it competes with the
-attacker, never amplifies). The one route below principal is a sustained negative carry (borrow rate > yield
-rate) — the levered position losing money on its own, attacker-independent.
+with `δ̄` the average staleness over the horizon — a δ-fraction of the yield the vault genuinely earned,
+unbounded over infinite time only because cumulative yield is, and never a fraction of principal. Debt interest only *shrinks* the pot (it competes with the
+attacker, never amplifies). Below principal comes only from the vault genuinely losing money — a sustained
+negative carry here (borrow rate > yield rate), attacker-independent; liquidation and de-peg are the other
+such channels (§7).
 
 **Coverage.** The saturation half is the two oscillation tests above; the regeneration half — principal
 holding across interleaved accrual + harvest + trend cycles — is `test_Repetition_YieldRegenTaxNotPrincipal`
@@ -173,7 +174,8 @@ Outside the deposit/redeem cycle:
   counterparty — ordinary swap MEV. Two things are tested: the swap mints no shares and interposing a
   `rebalance()` adds nothing to the straddle (`Core_RebalanceDoesNotAmplify` = 0), and every leg fills no
   worse than `oracle ± maxSlippageBps` (mechanism in `FCMVault.t.sol`), so the counterparty skim is bounded
-  by `(maxSlippageBps + δ) · volume` — `δ_Py` on the yield legs, `δ_Pc` on the collateral leg. Unlike the
+  per leg by `(maxSlippageBps + that leg's oracle gap) · volume` — the yield-mark gap on the yield legs, the
+  `Pc` staleness `δ` on the collateral leg. Unlike the
   deposit/redeem arbitrage this is a **real execution cost**: A5 does not fence it from principal and it does
   **not** saturate — it sums with price volatility (ordinary leveraged-vault drag), bounded *per event* by
   `maxSlippageBps`, throttled by the HF dead-band, killed as `δ→0`. Not a principal drain; real-pool fidelity
@@ -198,9 +200,9 @@ How each mitigation bears on the measured extraction:
 - **Oracle freshness** — extraction scales with `δ` and vanishes as `δ → 0`. The long-run leak is bounded by
   the yield the vault earns (§4), so the danger is not any single stale event but **persistent** `δ` over an
   accruing carry. A staleness keeper drives `δ → 0`; yield smearing already exists
-  at the source (FUSDEV is a Morpho Vault V2, whose `convertToAssets` accrues per block under a `maxRate` cap
-  and cannot jump), so the residual is the yield-oracle's fidelity/freshness to that smeared mark, not a
-  missing smear.
+  at the source (FUSDEV is a Morpho Vault V2 whose `convertToAssets` is `maxRate`-capped per block, so it
+  can't jump from accrual), so the residual is the yield-oracle's fidelity/freshness to that smeared mark,
+  not a missing smear.
 - **Harvest / slippage limit** — harvest keeps the carry (hence `Δ`) small; the swaps' `maxSlippageBps`
   limit is the §5 surface.
 - **Minimum holding period** — removes the atomic free option outright (Pyth's suggested mitigation). A
@@ -219,19 +221,14 @@ What this is, and isn't:
 - **Completeness is not proven.** Every extraction path we *identified* is bounded; we have not shown the
   list is complete (that no other path exists). The universal — "no attack vector at all" / full value
   conservation — is deferred to the audit and the broader value-conservation review.
-- **Extraction only.** This bounds what an attacker can *take* via deposit/redeem/rebalance. It does not
-  cover two neighbouring staleness failures that aren't extraction — over-levering off a stale `Pc` (or a
-  stalled delever) into a Morpho liquidation whose penalty hits principal, and a stale/reverting feed
-  bricking exits. Those are value-destruction / availability, bounded by Morpho's liquidation incentive
-  rather than the mispricing `Δ`, and tracked in the register (R21–R23, R6/R7).
-- **A genuine yield de-peg is credit risk, not extraction.** A FUSDEV `convertToAssets` impairment *with*
-  oracle lag reduces to the discount divergence and is bounded as extraction (§3); its *own* absolute loss —
-  mark and DEX falling together, no gap to arbitrage — is credit risk, out of scope, and does not preserve
-  absolute principal in that direction.
-- **The tests run on mocks.** The oracle is a settable value — `δ` is a test parameter, not a real Pyth
-  staleness/confidence check; fuzzing is bounded to the solvent/redeemable range (past it, exits
-  revert — `Core_PastCapExitReverts`); and the attacker-as-DEX-counterparty skim on the vault's own swaps
-  can't be modeled here (no reserve-backed, limit-honoring counterparty mock) — flagged for audit.
+- **Extraction only — real losses that aren't extraction are out of scope.** This bounds what an attacker
+  can *take* via deposit/redeem/rebalance. Three channels *do* reach principal but sit outside it, because
+  each is a loss the vault takes, not value conjured from the gap: a stale-`Pc` over-lever (or stalled
+  delever) → Morpho liquidation (penalty bounded by the LIF); a stale/reverting feed bricking exits; and a
+  genuine FUSDEV de-peg (credit risk). The first two are tracked in the register (R21–R23, R6/R7).
+- **The tests run on mocks.** `δ` is a settable test parameter, not a real Pyth staleness/confidence check;
+  and the forced-swap counterparty skim can't be modeled here — its real-pool fidelity is one of the two
+  audit checks below.
 - **The long-run bound rests on operational assumptions.** The δ-tax bound (§4) holds only as far as oracle
   freshness and harvest cadence do — neither enforced in-contract — and the §5 forced-swap skim is a real
   friction A5 does not fence from principal. Two things stay unverified, both *fidelity* checks for the audit:
