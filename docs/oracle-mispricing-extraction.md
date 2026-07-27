@@ -1,7 +1,8 @@
 # FCMVault — Stale-Price Arbitrage: Unit-Test Findings
 
 *How much value an attacker can pull out of the vault by depositing and redeeming around a stale price
-oracle. This measures the numbers; it doesn't rule on whether the vault is safe overall.*
+oracle. It bounds that one attack — not a full safety review; other risks (liquidation, a yield de-peg,
+sustained negative carry) are separate and out of scope.*
 
 **Summary.** The attack — **stale-price arbitrage**: deposit while the vault's share price is mismarked
 — a stale collateral oracle, or a yield mark diverged from where it trades — redeem once it corrects, and keep
@@ -150,7 +151,8 @@ a real credit loss the attacker front-runs, not extraction (§7).
 
 **Real yield is the only refill.** The carry regenerates solely from genuine accrual (`Py` rising), and
 harvest sweeps any surplus above `yieldFactorMax` into collateral, out of the priced term. Telescoping over
-any horizon gives the N-independent bound
+any horizon gives the N-independent bound (this tight form is a *derivation*; the test checks a looser
+envelope — Coverage below)
 
     Σ πᵢ  ≤  (standing carry at t₀)  +  δ̄ · (real yield accrued),
 
