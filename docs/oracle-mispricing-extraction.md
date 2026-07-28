@@ -13,7 +13,7 @@ the gap between the price you minted at and the true value the vault pays out. I
   leveraged position holds, net of its debt), **never the principal** (the collateral you deposited).
 - A bigger deposit takes a bigger slice of the gap, but never more than the gap; after trading fees, it
   stops paying past a certain size.
-- Repeating the cycle doesn't compound — taking the gap closes it.
+- Repeating the cycle doesn't compound — the pot is finite and price motion can't refill it.
 - All of it shrinks to zero as the oracle stays fresh.
 
 That ceiling is on the deposit/redeem *arbitrage*. Adjacent channels — §5's forced-swap skim, a sustained
@@ -30,9 +30,10 @@ oracle reprices the payout (A1). Their gap,
 
 is a **mispricing**: a quoted price that differs from the real one. Any attack is just **arbitrage**
 against it — mint at the cheap `V̂`, exit at the true `V*`. This is **stale-price arbitrage**, the same
-mechanism as mutual-fund *market-timing* (trading at a stale NAV), and its harm to existing holders is
-**dilution**. The classical result then applies: *profit can't exceed the mispricing.* So the whole
-question reduces to **how big `Δ` can get and what it touches** — the rest of this doc.
+mechanism as mutual-fund *market-timing* (trading at a stale NAV), and its harm to holders — including
+anyone entering mid-staleness — is **dilution**. The classical result then applies: *profit can't exceed
+the mispricing.* So the whole question reduces to **how big `Δ` can get and what it touches** — the rest of
+this doc.
 
 Two things are *not* this arbitrage and are handled separately: a **bug** (mints value from nothing, so
 nothing bounds it — out of scope, the audit's job) and **fee griefing** (the attacker gains nothing — §5).
@@ -87,8 +88,8 @@ rising toward `Δ` as `x` grows but never past it. So more capital — leverage,
 bigger slice of the *same* gap; it never widens the gap. Net of trading costs it's worse still: the DEX
 fee grows with `x` (real price impact only sharpens it), so the attacker's net profit peaks at some size and
 then goes negative. *(`Core_LossWithinStalenessGap`: honest loss stays within `δ` of the holder's claim.
-`Core_ProfitConcaveInSize`: net profit peaks at an interior size. `Core_OverMarkUnprofitable`
-(both axes): the opposite direction — vault *over*-valued — neither pays nor harms holders.)*
+`Core_ProfitConcaveInSize`: net profit peaks at an interior size. `Core_OverMarkUnprofitable`: the
+opposite direction — vault *over*-valued — neither pays nor harms holders.)*
 
 **It never reaches principal.** `Δ` involves only the carry `G`; principal `C` cancels (A5). So the
 entire attack surface is the yield the position holds, never the deposited collateral
@@ -137,12 +138,12 @@ that holds on every single cycle** (A5): each `Δ` misprices only the carry, so 
 `C` is outside the surface no matter how many cycles run — there's no cross-cycle accumulator on the
 principal axis for repetition to walk. What's left is the cumulative *carry* loss, and it splits cleanly.
 
-**Price motion only depletes the pot.** The extractable pot is the *standing* carry. Each skim takes a
-fraction (`< 1`) of the current mispriced carry and settles the rest at true price — **taking the gap
-closes it** — and the pot does not refill, so the series telescopes to ≤ the standing carry.
-This holds on **both** oracle axes, for *different* reasons: a `Pc` move re-marks a `Pc`-**independent** carry
-(`G = Y·Py − D`), injecting nothing; a yield-**mark** wobble only mis-prices the *mint* — redeem reads no
-oracle (A1) — so each skim depletes a pot the wobble can't refill.
+**Price motion can't refill the pot.** The extractable pot is the *standing* carry — finite, and
+value-conserving price motion and rebalancing add nothing to it. So repetition can't compound: the cumulative
+carry loss stays ≤ that one standing pot. The gap itself doesn't *close* — it persists; it just stops being
+**extractable** after the first cycle (a fresh deposit can no longer mint in below true value). This holds on
+**both** oracle axes: a `Pc` move re-marks a `Pc`-**independent** carry (`G = Y·Py − D`), injecting nothing;
+a yield-**mark** wobble only mis-prices the *mint* — redeem reads no oracle (A1).
 *(`Repetition_CollateralOscillationDoesNotCompound` and `Repetition_YieldOscillationDoesNotCompound`: 10 jitter
 cycles each, per-round extraction decays geometrically, cumulative ≤ ~2× a single event, last ≤ first,
 principal intact. The ~2× is a fixed-pot artifact at N=10, not the general bound; a real up-trend legitimately
@@ -150,21 +151,18 @@ exceeds it — next.)* The one yield motion that reaches principal — a genuine
 a real credit loss the attacker front-runs, not extraction (§7).
 
 **Real yield is the only refill.** The carry regenerates solely from genuine accrual (`Py` rising), and
-harvest sweeps any surplus above `yieldFactorMax` into collateral, out of the priced term. Telescoping over
-any horizon gives the N-independent bound (this tight form is a *derivation*; the test checks a looser
-envelope — Coverage below)
+harvest sweeps any surplus above `yieldFactorMax` into collateral, out of the priced term. Conservation caps
+the cumulative — the attacker can't transfer out more carry than the vault ever holds, and `C` never enters:
 
-    Σ πᵢ  ≤  (standing carry at t₀)  +  δ̄ · (real yield accrued),
+    Σ πᵢ  ≤  (standing carry)  +  (real yield accrued).
 
-with `δ̄` the average staleness over the horizon — a δ-fraction of the yield the vault genuinely earned,
-unbounded over infinite time only because cumulative yield is, and never a fraction of principal. Debt interest only *shrinks* the pot (it competes with the
-attacker, never amplifies). Below principal comes only from the vault genuinely losing money — a sustained
-negative carry here (borrow rate > yield rate), attacker-independent; liquidation and de-peg are the other
-such channels (§7).
-
-**Coverage.** The saturation half is the two oscillation tests above; the regeneration half — principal
-holding across interleaved accrual + harvest + trend cycles — is `test_Repetition_YieldRegenTaxNotPrincipal`
-below. The tighter δ̄-*fraction* bound is the telescoping derivation from A5, analytical, not separately tested.
+The standing-carry piece is taken at most once (a residue that doesn't compound — the oscillation tests); the
+yield piece is bounded by what the vault genuinely earns (`Repetition_YieldRegenTaxNotPrincipal`), unbounded
+over infinite time only because cumulative yield is, and never principal. It's a loose ceiling — the tests
+show the real number sits inside it — not a tight derivation. Debt interest only *shrinks* the pot (it
+competes with the attacker, never amplifies). Below principal comes only from the vault genuinely losing
+money — a sustained negative carry here (borrow rate > yield rate), attacker-independent; liquidation and
+de-peg are the other such channels (§7).
 
 ## 5. Adjacent surfaces
 
@@ -212,15 +210,16 @@ How each mitigation bears on the measured extraction:
 
 What this is, and isn't:
 
-- **Derivations + tests, not formal verification.** Each bound is a short closed-form
-  derivation checked by tests over the reachable range (§§2–4) — fuzzed for the §2–3 gap bounds,
-  deterministic scenarios for the repetition and control cases. Strong evidence, not a
-  machine-checked proof.
+- **Arguments + tests, not formal verification.** Each bound is a short argument — closed-form algebra for
+  the §2–3 gap bounds, a conservation/saturation argument for the §4 repetition case — checked by tests over
+  the reachable range (fuzzed for §2–3, deterministic scenarios for repetition and controls). Strong
+  evidence, not a machine-checked proof.
 - **Conditional on the assumptions (A1–A5).** Those are asserted as checkable facts about the code, not
   proven exhaustive. If one breaks — e.g. a payout path starts reading a mark (A1) — the bounds break with it.
-- **Completeness is not proven.** Every extraction path we *identified* is bounded; we have not shown the
-  list is complete (that no other path exists). The universal — "no attack vector at all" / full value
-  conservation — is deferred to the audit and the broader value-conservation review.
+- **Bounds on identified paths — not a proof of exhaustiveness.** Every extraction path we *identified* is
+  bounded here; we do not claim the list is complete. The universal — "no attack vector at all" / full value
+  conservation — is a formal, whole-surface question beyond what these unit tests can establish; it belongs
+  to the separate value-conservation review, not this deliverable.
 - **Extraction only — real losses that aren't extraction are out of scope.** This bounds what an attacker
   can *take* via deposit/redeem/rebalance. Three channels *do* reach principal but sit outside it, because
   each is a loss the vault takes, not value conjured from the gap: a stale-`Pc` over-lever (or stalled
