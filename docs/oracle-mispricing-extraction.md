@@ -179,9 +179,10 @@ untested channels belong to the value-conservation review and the audit (§7):
 
 ## 6. Next steps
 
-The practical control is a **staleness keeper** driving `δ → 0` — the leak scales with `δ`, and the DEX fee
-is only a partial offset, not the defense (`Control_DexFeeOnlyPartiallyOffsets`). Harvest would keep the
-carry small but never fires in these tests (§4).
+The real defense is a keeper that **keeps the price feed fresh** — the staler the feed, the more an attacker
+can skim, so keeping it current drives the leak toward zero. Don't rely on the DEX trading fee: it only
+partly offsets the attack, it doesn't prevent it (`Control_DexFeeOnlyPartiallyOffsets`). (Harvesting the
+vault's surplus yield would help too, but these tests don't exercise it.)
 
 ## 7. Limitations
 
