@@ -180,9 +180,10 @@ untested channels belong to the value-conservation review and the audit (§7):
 ## 6. Next steps
 
 The real defense is a keeper that **keeps the price feed fresh** — the staler the feed, the more an attacker
-can skim, so keeping it current drives the leak toward zero. Don't rely on the DEX trading fee: it only
-partly offsets the attack, it doesn't prevent it (`Control_DexFeeOnlyPartiallyOffsets`). (Harvesting the
-vault's surplus yield would help too, but these tests don't exercise it.)
+can skim, so keeping it current drives the leak toward zero. The swap fees the attacker pays each cycle don't
+save you — at the vault's real (low) fee they're too small to make the attack unprofitable
+(`Control_DexFeeOnlyPartiallyOffsets`). (Harvesting the vault's surplus yield would help too, but these tests
+don't exercise it.)
 
 ## 7. Limitations
 
