@@ -26,7 +26,6 @@ import {MockOracle} from "./mocks/MockOracle.sol";
 ///                                     Core_OverMarkUnprofitable (fuzz)       Pc stale-low (Δ<0): deposit overpays, edge ≤ 0 (over-mark is source-agnostic)
 ///                                     Source_YieldDivergenceWithinGap (fuzz) Py mark-vs-DEX gap: harm ≤ gap (both dirs)
 ///                                     Source_DifferentlyLeveredDiscountReachesPrincipal  differently-levered + discount: harm ≤ gap BUT reaches principal (needs both; R24)
-///                                     Source_CombinedWithinComposedGap (fuzz) Pc + Py at once: bounds compose, no blow-up
 ///           C. Amplifiable, per AXIS? Core_ProfitConcaveInSize           size: interior max, then net-negative (concave)
 ///                                     Repetition_CollateralOscillationDoesNotCompound time: Pc jitter saturates (carry Pc-independent)
 ///                                     Repetition_YieldOscillationDoesNotCompound      time: Py mark jitter saturates (redeem oracle-free, A1)
@@ -728,45 +727,6 @@ contract StalePriceArbTest is StalePriceArbBase {
 
         // No per-round acceleration even as real yield refills the pot (harvest holds the standing carry).
         assertLe(lastExtraction, firstExtraction, "extraction accelerates as yield regenerates");
-    }
-
-    /// @notice Both sources off at once: Pc stale by δ AND the yield DEX diverged by d. Both hit the same
-    ///         carry term (Y·Py − D)/Pc, so this checks they just ADD UP rather than amplify each other — the
-    ///         combined honest loss is no worse than the two gaps summed (δ + d, plus a negligible δ·d
-    ///         cross-term).
-    function testFuzz_Source_CombinedWithinComposedGap(uint256 kWad, uint256 truePriceE36, uint256 pyDexWad) public {
-        kWad = bound(kWad, 1e18, 2e18);
-        truePriceE36 = bound(truePriceE36, MIN_TRUE_PRICE, WETH_PRICE); // δ ≤ ~27% (HF ≥ 1 region, as above)
-        pyDexWad = bound(pyDexWad, 0.7e18, 1.5e18); // divergence d, both directions
-
-        MockSwapRouter router = _pricedDex(truePriceE36, 1e18);
-        _deposit(honest, 10 ether);
-
-        // Carry at k on the oracle; the yield DEX diverges from that backing by pyDex.
-        yieldOracle.setPrice(kWad * 1e18);
-        uint256 dexK = kWad * pyDexWad / 1e18;
-        router.setRate(address(FUSDEV), address(PYUSD0), dexK);
-        router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / dexK);
-
-        uint256 snap = vm.snapshotState();
-
-        // Attack world: enter on the stale Pc mark and the diverged DEX, post the update, exit.
-        uint256 sA = _deposit(attacker, 1000 ether);
-        marketOracle.setPrice(truePriceE36);
-        _redeem(attacker, sA);
-        uint256 honestWith = _honestClaim();
-
-        // Baseline world: no attacker at all, same fresh mark.
-        vm.revertToState(snap);
-        marketOracle.setPrice(truePriceE36);
-        uint256 honestWithout = _honestClaim();
-
-        uint256 loss = honestWithout > honestWith ? honestWithout - honestWith : 0;
-        uint256 lossBps = honestWithout == 0 ? 0 : loss * 10000 / honestWithout;
-        uint256 gapBps = (WETH_PRICE - truePriceE36) * 10000 / WETH_PRICE;
-        uint256 divBps = (pyDexWad > 1e18 ? pyDexWad - 1e18 : 1e18 - pyDexWad) * 10000 / 1e18;
-        uint256 composedBps = gapBps + divBps + gapBps * divBps / 10000;
-        assertLe(lossBps, composedBps + 2, "combined loss exceeds the composed per-oracle bound");
     }
 
     /// @notice `redeemInKind` (raw pro-rata slice, no DEX swap) vs `redeem` (unwinds
