@@ -74,8 +74,8 @@ as a fraction (`|booked − true| / booked`, how the fuzz tests normalize it).
   but none of them sets the price paid. *(Redeem payout is independent of the mark in both directions —
   `Exit_RedeemMarkIndependent`; both exits deliver the same true value — `Exit_InKindEqualsRedeem`. So the
   sell side of the timing game is dead, and the whole attack surface is the deposit side.)*
-- **(A2) The mint reads the oracle.** `deposit` credits the booked value and mints in proportion, so a
-  deposit of `x` earns `≈ x/(V̂+x)` of the vault afterward (`FCMVault:615`).
+- **(A2) The mint reads the oracle.** `deposit` credits the booked value and mints in proportion — a bigger
+  deposit earns a proportionally bigger share of the vault (`FCMVault:615`).
 - **(A3) No entry/exit fee.**
 - **(A4) It's atomic — a free option.** The attacker fixes booked and true in one transaction: enter at
   booked, optionally rebalance, exit at true; take the profitable side or abort. No risk.
