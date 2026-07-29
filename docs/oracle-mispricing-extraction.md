@@ -27,10 +27,10 @@ transaction) but tightly bounded. The tests show:
 - A bigger deposit takes a bigger slice of the gap, but never more than the gap; after trading fees, it
   stops paying past a certain size.
 - Repeating the cycle doesn't compound — the pot is finite and price motion can't refill it.
-- All of it shrinks to zero as the oracle stays fresh.
+- All of it shrinks to zero as the oracle stays fresh — so the defense is a keeper that keeps the feed fresh.
 
 Each finding is a short argument checked against fuzz tests over the reachable range — evidence, not a formal
-proof (§7).
+proof (§6).
 
 **What we're measuring.** The vault has two prices for the same share: the **booked** value `V̂`, computed
 from the stale oracle when you `deposit`, and the **true value** `V*`, what `redeem` actually pays — no
@@ -70,7 +70,7 @@ as a fraction (`|booked − true| / booked`, how the fuzz tests normalize it).
 
 - **(A1) No oracle reprices the payout.** `redeem`/`redeemInKind` hand back a pro-rata slice of the *actual
   holdings*, realized at the **DEX** price — which this doc takes as the true value (a mispriced pool is the
-  §3 / §7 real-pool-fidelity item; it doesn't break this bound). The exit path still *reads* oracles (fee accrual, Morpho's health check),
+  §3 / §6 real-pool-fidelity item; it doesn't break this bound). The exit path still *reads* oracles (fee accrual, Morpho's health check),
   but none of them sets the price paid. *(Redeem payout is independent of the mark in both directions —
   `Exit_RedeemMarkIndependent`; both exits deliver the same true value — `Exit_InKindEqualsRedeem`. So the
   sell side of the timing game is dead, and the whole attack surface is the deposit side.)*
@@ -88,8 +88,7 @@ Three claims, each a short derivation the tests confirm.
 
 **It's zero-sum.** Deposit and redeem only move value around: a deposit adds `x`, a redeem returns a
 slice worth `P` at true prices (A1). So the attacker's profit `π = P − x` is the honest holders'
-loss (with real fees, their loss ≥ the attacker's gain — §6) —
-bounding profit bounds the harm. *(`Core_LossWithinStalenessGap` checks gain ≈ loss.)*
+loss — bounding profit bounds the harm. *(`Core_LossWithinStalenessGap` checks gain ≈ loss.)*
 
 **Profit is capped by the gap.** A deposit only ever earns a *fraction* of the vault, so it skims a fraction
 of the gap — never more:
@@ -128,19 +127,17 @@ by the gap:
   carry-fenced (A5 holds only for a uniform misprice). It's bounded by the gap, un-manufacturable, and
   non-compounding (each event needs a fresh setup), and it takes *both* a composition skew and a wide discount
   — frequent rebalancing keeps the skew small, so in practice it's a small, conditional edge (a few percent of
-  NAV only at an extreme ~90% divergence). It's really a facet of the yield-oracle-fidelity question (§7 / R12),
+  NAV only at an extreme ~90% divergence). It's really a facet of the yield-oracle-fidelity question (§6 / R12),
   not a standing drain *(`Source_DifferentlyLeveredDiscountReachesPrincipal`; R24)*.
 
 Both are fuzzed (discount to 90%, premium to +100%) in `Source_YieldDivergenceWithinGap`, which caps
 honest harm at the gap.
 
-**Manufacturing a gap doesn't pay — self-extraction loses, and a bystander can opt out.** The mark isn't
-tradeable (it's `convertToAssets`, not the pool), so the only lever is pushing the DEX pool — which costs the
-attacker the price impact, netting ≤ 0 on their own round-trip (`Manufacture_SelfExtractionUnprofitable`,
-self-extraction bounded by `maxTvl`). Sandwiching a *bystander's* plain redeem is ordinary MEV — bounded not
-by attacker-unprofitability but by the victim taking `redeemInKind`: the raw slice, worth at least the
-manipulated redeem (`Exit_InKindFloorsDepressedRedeem`) and equal to a normal redeem at par
-(`Exit_InKindEqualsRedeem`).
+**Manufacturing a gap doesn't pay.** The mark isn't tradeable (it's `convertToAssets`, not the pool), so the
+only lever is pushing the DEX pool — which costs the attacker the price impact, netting ≤ 0 on the round-trip
+(`Manufacture_SelfExtractionUnprofitable`, bounded by `maxTvl`). And a bystander facing a manipulated pool can
+dodge it by taking `redeemInKind` — the raw slice is worth at least the manipulated redeem
+(`Exit_InKindFloorsDepressedRedeem`).
 
 **Both at once.** A stale `Pc` and a yield divergence compound — roughly additively, with a small
 cross-term — but there's no blow-up (`Source_CombinedWithinComposedGap`).
@@ -159,12 +156,12 @@ being extractable after the first cycle (a fresh deposit can no longer mint in b
 vault actually earned — never principal. *(`Repetition_CollateralOscillationDoesNotCompound`,
 `Repetition_YieldOscillationDoesNotCompound`: jittered cycles, no per-round acceleration, principal intact.
 `Repetition_YieldRegenTaxNotPrincipal`: 200 rounds with real accrual, loss ≤ earned yield, realized principal
-floor held.)* A genuine `convertToAssets` de-peg is a credit loss the attacker front-runs, not extraction (§7).
+floor held.)* A genuine `convertToAssets` de-peg is a credit loss the attacker front-runs, not extraction (§6).
 
 ## 5. Adjacent surfaces
 
 This bound covers only the deposit/redeem cycle. The rest is noted so the result isn't over-read; the
-untested channels belong to the value-conservation review and the audit (§7):
+untested channels belong to the value-conservation review and the audit (§6):
 
 - **Rebalance/harvest swaps** leak the same gap to the DEX counterparty (ordinary swap MEV), but a
   `rebalance()` interposed in the straddle adds nothing (`Core_RebalanceDoesNotAmplify` = 0), and each leg
@@ -176,13 +173,7 @@ untested channels belong to the value-conservation review and the audit (§7):
   one and profit could exceed `Δ`. The deposit/redeem legs are intentionally unfloored (per-user slippage is
   the ERC-4626 router's job).
 
-## 6. Next steps
-
-The real defense is a keeper that **keeps the price feed fresh** — the staler the feed, the more an attacker
-can skim, so keeping it current drives the leak toward zero. (Harvesting the vault's surplus yield would help
-too, but these tests don't exercise it.)
-
-## 7. Limitations
+## 6. Limitations
 
 What this is, and isn't:
 
