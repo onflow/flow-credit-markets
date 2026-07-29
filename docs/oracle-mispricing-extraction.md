@@ -106,8 +106,7 @@ discount over-mint of §3 — bounded and un-manufacturable, not a carry-fenced 
 
 ## 3. Where the gap comes from
 
-Two sources, plus what happens if you try to manufacture one. (How the two *combine* is a composition
-question — bounded on its own here, deferred to the value-conservation review, §7.)
+Two sources, plus what happens if you try to manufacture one.
 
 **Stale collateral oracle (`Pc`) — small.** The vault is WETH-in/WETH-out, and both it and Morpho read
 the same `Pc`, so a price move barely shifts value-per-share. A balanced book (no carry) leaks only dust
@@ -141,6 +140,9 @@ self-extraction bounded by `maxTvl`). Sandwiching a *bystander's* plain redeem i
 by attacker-unprofitability but by the victim taking `redeemInKind`: the raw slice, worth at least the
 manipulated redeem (`Exit_InKindFloorsDepressedRedeem`) and equal to a normal redeem at par
 (`Exit_InKindEqualsRedeem`).
+
+**Both at once.** A stale `Pc` and a yield divergence compound — roughly additively, with a small
+cross-term — but there's no blow-up (`Source_CombinedWithinComposedGap`).
 
 ## 4. Repeating the cycle over a long horizon
 
