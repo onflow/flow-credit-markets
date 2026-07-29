@@ -179,7 +179,7 @@ What this is, and isn't:
 
 - **Evidence on identified paths, not formal verification.** Each bound is a short argument — closed-form
   algebra for §2–3, a conservation/saturation argument for §4 — checked by tests over the reachable range
-  (fuzzed for §2–3, deterministic for repetition/controls). Strong evidence, not a machine-checked proof, and
+  (fuzzed for §2–3, deterministic for the repetition scenarios). Strong evidence, not a machine-checked proof, and
   not a claim the identified list is complete: the universal question — full value conservation across all
   surfaces — belongs to the separate value-conservation review, not this deliverable.
 - **Conditional on the assumptions (A1–A5).** Those are asserted as checkable facts about the code, not

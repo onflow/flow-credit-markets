@@ -35,7 +35,7 @@ import {MockOracle} from "./mocks/MockOracle.sol";
 ///                                     Core_RebalanceDoesNotAmplify       interposed rebalance(): amplification = 0 (source-agnostic)
 ///           D. Manufacturable?        (StalePriceArbManipulation.t.sol) Manufacture_SelfExtractionUnprofitable       net < 0
 ///                                     (StalePriceArbManipulation.t.sol) Exit_InKindFloorsDepressedRedeem (fuzz)      bystander escapes in-kind ≥ redeem
-///           E. Exit / controls sound? Exit_RedeemMarkIndependent         redeem payout independent of the mark (both dirs) → A1, sell side dead
+///           E. Exit sound?            Exit_RedeemMarkIndependent         redeem payout independent of the mark (both dirs) → A1, sell side dead
 ///                                     Exit_InKindEqualsRedeem            in-kind == redeem (same rate) → A1
 ///         Full write-up: docs/oracle-mispricing-extraction.md.
 ///
