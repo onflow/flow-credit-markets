@@ -4,8 +4,8 @@
 stale or diverged price. This is the **executable-evidence slice** for that single surface — it quantifies
 and regression-guards it. It is **not** the general value-conservation question (whether any ordering of
 legitimate operations can extract value, across all surfaces); that is a separate, broader effort, and every
-whole-surface claim here defers to it. Liquidation, a yield de-peg, and sustained negative carry are out of
-scope.*
+whole-surface claim here defers to it. Liquidation, a yield de-peg, and sustained negative carry are out of scope — those are the leveraged
+position losing value (solvency / credit), not a mispriced share being arbitraged.*
 
 **Summary.** The mechanism is simpler than it looks: a `deposit` mints shares against the **oracle-priced
 NAV**, while a `redeem` returns a **pro-rata slice of the real tokens** at the market price — so deposited
