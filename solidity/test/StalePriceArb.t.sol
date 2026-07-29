@@ -56,13 +56,9 @@ import {MockOracle} from "./mocks/MockOracle.sol";
 ///             test_PriceLimit_OracleMathMatchesOracleAndSlippage); no per-share NAV bound
 ///             on a forced rebalance is asserted there or here.
 contract StalePriceArbTest is StalePriceArbBase {
-    // Largest oracle staleness (δ) the timing fuzz applies: a 27.5% gap between the stale mark and
-    // the true price. Not arbitrary — the deposit levers to ~1.45x health factor, so a pro-rata
-    // (Case-A) redeem reverts on real Morpho once the drop exhausts that buffer (~31.5%). The 27.5%
-    // cap sits conservatively inside the redeemable region; test_Core_PastCapExitReverts
-    // verifies the redeem succeeds here and reverts on a deep crash. MIN_TRUE_PRICE is that cap as a
-    // price (the fuzz floor); the suite enforces Morpho's HF>=1 gate (setUp), so every fuzzed redeem
-    // is verified solvent, not assumed.
+    // Largest oracle staleness (δ) the timing fuzz applies — a 27.5% gap. Chosen to sit conservatively
+    // inside the region where the corrected position stays solvent (HF ≥ 1) so the redeem executes;
+    // test_Core_PastCapExitReverts checks the boundary. MIN_TRUE_PRICE is that cap as a price.
     uint256 internal constant MAX_STALENESS_BPS = 2750; // 27.5%
     uint256 internal constant MIN_TRUE_PRICE = WETH_PRICE * (10_000 - MAX_STALENESS_BPS) / 10_000;
 
@@ -543,9 +539,8 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertLe(lastExtraction, firstExtraction, "yield-mark jitter extraction accelerates (compounds)");
         assertLe(cumulativeLoss, 2 * uint256(firstExtraction), "yield-jitter drain accumulates instead of saturating");
 
-        // Saturation IS convergence to a composition fixed point: cycle 0 shifts the yield balance hard
-        // (the one-time extraction), then per-round motion decays toward zero. A re-arming dynamic would
-        // keep moving the composition by a comparable amount every round instead of settling.
+        // Saturation IS convergence to a composition fixed point: cycle 0 shifts the balance (the one-time
+        // extraction), then per-round motion decays toward zero — a re-arming dynamic wouldn't settle.
         uint256 firstMove = ybStart > yb0 ? ybStart - yb0 : yb0 - ybStart;
         uint256 lastMove = ybPrev > ybLast ? ybPrev - ybLast : ybLast - ybPrev;
         assertLt(lastMove, firstMove / 100, "yield composition still moving at horizon end - not converging");
