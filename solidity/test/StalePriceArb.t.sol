@@ -62,6 +62,10 @@ contract StalePriceArbTest is StalePriceArbBase {
     uint256 internal constant MAX_STALENESS_BPS = 2750; // 27.5%
     uint256 internal constant MIN_TRUE_PRICE = WETH_PRICE * (10_000 - MAX_STALENESS_BPS) / 10_000;
 
+    // Yield/debt pool slot0 at a ~1.5 yield/debt ratio: sqrtPriceX96 ≈ √(1/1.5)·2^96. Set so the pool
+    // matches the yield oracle and a rebalance's swap gate passes, instead of skipping on a mismatched pool.
+    uint160 internal constant POOL_SQRT_PRICE_K1_5 = 64500000000000000000000000000;
+
     function setUp() public {
         _etchCommon();
         vm.etch(address(SwapLib.SWAP_ROUTER), address(new MockSwapRouter()).code);
@@ -269,7 +273,7 @@ contract StalePriceArbTest is StalePriceArbBase {
         router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / kWad);
         // Align the yield/debt pool to the oracle (k≈1.5) so the interposed rebalance's swap gate passes
         // and the leg actually FIRES — otherwise it skips against the 1:1 mock and the test is a no-op.
-        yieldPool.setSqrtPriceX96(64500000000000000000000000000);
+        yieldPool.setSqrtPriceX96(POOL_SQRT_PRICE_K1_5);
 
         uint256 inAmt = 1000 ether; // attacker holds ~all supply → maximal extraction
         uint256 snap = vm.snapshotState();
@@ -567,7 +571,7 @@ contract StalePriceArbTest is StalePriceArbBase {
         router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / q);
         marketOracle.setPrice(1800e36);
         yieldOracle.setPrice(q * 1e18);
-        yieldPool.setSqrtPriceX96(64500000000000000000000000000); // align pool so the delever fires
+        yieldPool.setSqrtPriceX96(POOL_SQRT_PRICE_K1_5); // align pool so the delever fires
         _deposit(honest, 10 ether);
 
         // Create the mismatch: crash Pc → HF below band → delever sells yield (pool under-dense), restore Pc.
