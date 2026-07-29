@@ -25,6 +25,7 @@ import {MockOracle} from "./mocks/MockOracle.sol";
 ///           B. Bounded, per SOURCE?   Core_LossWithinStalenessGap (fuzz)     Pc stale-high (Δ>0): loss ≤ δ, never principal, zero-sum
 ///                                     Core_OverMarkUnprofitable (fuzz)       Pc stale-low (Δ<0): deposit overpays, edge ≤ 0 (over-mark is source-agnostic)
 ///                                     Source_YieldDivergenceWithinGap (fuzz) Py mark-vs-DEX gap: harm ≤ gap (both dirs)
+///                                     Source_DifferentlyLeveredDiscountReachesPrincipal  differently-levered + discount: harm ≤ gap BUT reaches principal (needs both; R24)
 ///                                     Source_CombinedWithinComposedGap (fuzz) Pc + Py at once: bounds compose, no blow-up
 ///           C. Amplifiable, per AXIS? Core_ProfitConcaveInSize           size: interior max, then negative, peak < 1 WETH
 ///                                     Repetition_CollateralOscillationDoesNotCompound time: Pc jitter saturates (carry Pc-independent)
@@ -34,7 +35,8 @@ import {MockOracle} from "./mocks/MockOracle.sol";
 ///                                     Core_RebalanceDoesNotAmplify       interposed rebalance(): amplification = 0 (source-agnostic)
 ///           D. Manufacturable?        (StalePriceArbManipulation.t.sol) Manufacture_SelfExtractionUnprofitable       net < 0
 ///                                     (StalePriceArbManipulation.t.sol) Exit_InKindFloorsDepressedRedeem (fuzz)      bystander escapes in-kind ≥ redeem
-///           E. Exit / controls sound? Exit_InKindEqualsRedeem            in-kind == redeem (same rate) → A1
+///           E. Exit / controls sound? Exit_RedeemMarkIndependent         redeem payout independent of the mark (both dirs) → A1, sell side dead
+///                                     Exit_InKindEqualsRedeem            in-kind == redeem (same rate) → A1
 ///                                     Control_DexFeeOnlyPartiallyOffsets fee ≠ the defense (keeper is)
 ///         Full write-up: docs/oracle-mispricing-extraction.md.
 ///
@@ -275,6 +277,9 @@ contract StalePriceArbTest is StalePriceArbBase {
         yieldOracle.setPrice(kWad * 1e18);
         router.setRate(address(FUSDEV), address(PYUSD0), kWad);
         router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / kWad);
+        // Align the yield/debt pool to the oracle (k≈1.5) so the interposed rebalance's swap gate passes
+        // and the leg actually FIRES — otherwise it skips against the 1:1 mock and the test is a no-op.
+        yieldPool.setSqrtPriceX96(64500000000000000000000000000);
 
         uint256 inAmt = 1000 ether; // attacker holds ~all supply → maximal extraction
         uint256 snap = vm.snapshotState();
@@ -297,10 +302,13 @@ contract StalePriceArbTest is StalePriceArbBase {
         uint256 honestStale = _honestClaim();
         vm.revertToState(snap);
 
-        // World R2 — interpose rebalance() AFTER Pc refreshes.
+        // World R2 — interpose rebalance() AFTER Pc refreshes. At the crashed Pc the position is below
+        // the HF band, so the interposed rebalance FIRES a delever (sells yield → repays debt).
         s = _deposit(attacker, inAmt);
         marketOracle.setPrice(MIN_TRUE_PRICE);
+        uint256 fB2 = FUSDEV.balanceOf(address(vault));
         vault.rebalance();
+        uint256 fA2 = FUSDEV.balanceOf(address(vault));
         int256 piRebFresh = int256(_redeem(attacker, s)) - int256(inAmt);
         uint256 honestFresh = _honestClaim();
 
@@ -310,10 +318,14 @@ contract StalePriceArbTest is StalePriceArbBase {
         emit log_named_int("amplification, stale-insert (wei)", piRebStale - piPlain);
         emit log_named_int("amplification, fresh-insert (wei)", piRebFresh - piPlain);
         emit log_named_uint("stale-insert rebalance moved value? (1/0)", fA1 != fB1 ? 1 : 0);
+        emit log_named_uint("fresh-insert rebalance moved value? (1/0)", fA2 != fB2 ? 1 : 0);
         emit log_named_uint(
             "honest claim after, worst case (principal 10e18)", honestStale < honestFresh ? honestStale : honestFresh
         );
 
+        // At least one interposed rebalance must actually FIRE (move value), or the amplification check is
+        // vacuous. The pool is aligned above, so the fresh-insert delever fires at the crashed Pc.
+        assertTrue(fA1 != fB1 || fA2 != fB2, "no interposed rebalance fired - amplification test vacuous");
         // Inserting a rebalance at EITHER point never amplifies (it mints the attacker no shares; any
         // swap cost is pro-rata), and never reaches honest principal.
         assertLe(piRebStale, piPlain + 2, "rebalance-at-stale amplified extraction");
@@ -438,8 +450,9 @@ contract StalePriceArbTest is StalePriceArbBase {
     ///         and the attacker sandwiches each swing, the drain SATURATES — it does not stack per
     ///         bounce — because the carry is `Pc`-INDEPENDENT (`G = Y·Py − D`), so a swing re-marks the
     ///         same fixed pot and injects nothing. Asserts no per-round acceleration (last ≤ first),
-    ///         cumulative within ~2× one event, and principal preserved. (Yield-axis twin below saturates
-    ///         too, but for a different reason — see it.)
+    ///         cumulative within ~2× one event, principal preserved, and the composition converging to a
+    ///         fixed point (per-round motion → 0). (Yield-axis twin below saturates the same way — the
+    ///         composition converges — its pot stays bounded for a source-specific reason: redeem reads no oracle, A1.)
     function test_Repetition_CollateralOscillationDoesNotCompound() public {
         MockSwapRouter router = _pricedDex(1800e36, 1e18);
         _deposit(honest, 10 ether);
@@ -454,6 +467,10 @@ contract StalePriceArbTest is StalePriceArbBase {
         uint256 baseline = _honestClaim();
         int256 firstExtraction;
         int256 lastExtraction;
+        uint256 ybStart = FUSDEV.balanceOf(address(vault)); // composition before any attack
+        uint256 yb0;
+        uint256 ybPrev;
+        uint256 ybLast;
         for (uint256 i = 0; i < rounds; i++) {
             marketOracle.setPrice(2000e36); // jitter: re-stale
             uint256 s = _deposit(attacker, inAmt);
@@ -461,6 +478,11 @@ contract StalePriceArbTest is StalePriceArbBase {
             int256 pnl = int256(_redeem(attacker, s)) - int256(inAmt);
             if (i == 0) firstExtraction = pnl;
             if (i == rounds - 1) lastExtraction = pnl;
+            // Attacker fully unwound → end-of-round is the honest-only composition.
+            uint256 yb = FUSDEV.balanceOf(address(vault));
+            if (i == 0) yb0 = yb;
+            if (i == rounds - 2) ybPrev = yb;
+            if (i == rounds - 1) ybLast = yb;
         }
         uint256 endClaim = _honestClaim();
         uint256 cumulativeLoss = baseline > endClaim ? baseline - endClaim : 0;
@@ -468,6 +490,12 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertLe(lastExtraction, firstExtraction, "extraction accelerates across bounces (compounds)");
         assertLe(cumulativeLoss, 2 * uint256(firstExtraction), "jitter drain accumulates instead of saturating");
         assertGe(endClaim, 10 ether, "jitter drain reached principal");
+
+        // Saturation IS convergence to a composition fixed point: the deposit/redeem straddle settles the
+        // composition, so per-round motion decays toward zero (same mechanism as the yield twin below).
+        uint256 firstMove = ybStart > yb0 ? ybStart - yb0 : yb0 - ybStart;
+        uint256 lastMove = ybPrev > ybLast ? ybPrev - ybLast : ybLast - ybPrev;
+        assertLt(lastMove, firstMove / 100, "collateral composition still moving at horizon end - not converging");
     }
 
     /// @notice YIELD-axis oscillation does not compound — the twin of the collateral case, and the one
@@ -494,6 +522,10 @@ contract StalePriceArbTest is StalePriceArbBase {
         uint256 baseline = _honestClaim();
         int256 firstExtraction;
         int256 lastExtraction;
+        uint256 ybStart = FUSDEV.balanceOf(address(vault)); // honest-only composition, before any attack
+        uint256 yb0;
+        uint256 ybPrev;
+        uint256 ybLast;
         for (uint256 i = 0; i < rounds; i++) {
             yieldOracle.setPrice(kStale * 1e18); // mark jitters stale-low → NAV under-marked
             uint256 s = _deposit(attacker, inAmt);
@@ -501,6 +533,11 @@ contract StalePriceArbTest is StalePriceArbBase {
             int256 pnl = int256(_redeem(attacker, s)) - int256(inAmt);
             if (i == 0) firstExtraction = pnl;
             if (i == rounds - 1) lastExtraction = pnl;
+            // Attacker fully unwound → end-of-round is the honest-only composition.
+            uint256 yb = FUSDEV.balanceOf(address(vault));
+            if (i == 0) yb0 = yb;
+            if (i == rounds - 2) ybPrev = yb;
+            if (i == rounds - 1) ybLast = yb;
         }
         uint256 endClaim = _honestClaim();
         uint256 cumulativeLoss = baseline > endClaim ? baseline - endClaim : 0;
@@ -512,10 +549,116 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertLe(lastExtraction, firstExtraction, "yield-mark jitter extraction accelerates (compounds)");
         assertLe(cumulativeLoss, 2 * uint256(firstExtraction), "yield-jitter drain accumulates instead of saturating");
 
+        // Saturation IS convergence to a composition fixed point: cycle 0 shifts the yield balance hard
+        // (the one-time extraction), then per-round motion decays toward zero. A re-arming dynamic would
+        // keep moving the composition by a comparable amount every round instead of settling.
+        uint256 firstMove = ybStart > yb0 ? ybStart - yb0 : yb0 - ybStart;
+        uint256 lastMove = ybPrev > ybLast ? ybPrev - ybLast : ybLast - ybPrev;
+        assertLt(lastMove, firstMove / 100, "yield composition still moving at horizon end - not converging");
+
         // Principal floor on a REALIZED redeem (oracle-free, A1) — the mark that jittered can't mask it.
         uint256 realized = _redeem(honest, vault.balanceOf(honest));
         emit log_named_uint("yield-jitter honest realized (WETH wei; principal = 10e18)", realized);
         assertGe(realized, 10 ether - 2, "yield-jitter drain reached principal");
+    }
+
+    /// @notice The one deposit/redeem path that reaches PRINCIPAL: a differently-levered deposit made while
+    ///         the yield mark reads ABOVE where the token trades (Py > Py_dex — the discount direction of §3,
+    ///         i.e. the yield valuation with no market sanity bound). It needs BOTH: a composition mismatch
+    ///         (vault under-levered vs the band midpoint, here left by a delever) AND the pool discount.
+    ///         Either alone extracts ~0; together, the deposit's cheaply-bought yield is credited at the high
+    ///         mark, over-mints, and dilutes holders — and because the deposit is levered unlike the book, the
+    ///         gap no longer cancels (A5 holds only for a uniform misprice), so it lands on PRINCIPAL. Harm is
+    ///         still bounded by the divergence gap (harm ≤ gap, as Source_YieldDivergenceWithinGap). Note the
+    ///         setup is a ZERO-CARRY vault (no accrual) — the no-buffer case: in a carrying vault the accrued
+    ///         carry absorbs the skim and it eats carry instead. So it reaches principal only when the mark
+    ///         holds no buffer (fresh vault, or convertToAssets that can dip rather than ratchet up — R12).
+    ///         Un-manufacturable (Manufacture_* ). Register R24.
+    function test_Source_DifferentlyLeveredDiscountReachesPrincipal() public {
+        uint256 q = 1.5e18; // pool rate for yield
+        MockSwapRouter router = _pricedDex(1800e36, 1e18);
+        router.setRate(address(FUSDEV), address(PYUSD0), q);
+        router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / q);
+        marketOracle.setPrice(1800e36);
+        yieldOracle.setPrice(q * 1e18);
+        yieldPool.setSqrtPriceX96(64500000000000000000000000000); // align pool so the delever fires
+        _deposit(honest, 10 ether);
+
+        // Create the mismatch: crash Pc → HF below band → delever sells yield (pool under-dense), restore Pc.
+        marketOracle.setPrice(1500e36);
+        vault.rebalance();
+        marketOracle.setPrice(1800e36);
+
+        uint256 base = vm.snapshotState();
+
+        // Control — mismatch present, NO discount (mark == pool). The one-sided condition extracts nothing.
+        yieldOracle.setPrice(q * 1e18);
+        uint256 sc = _deposit(attacker, 1000 ether);
+        int256 pnlNoDisc = int256(_redeem(attacker, sc)) - int256(1000 ether);
+        vm.revertToState(base);
+
+        // Combined — mismatch + a 5% discount (mark above pool). Over-mints, reaches principal, bounded by gap.
+        uint256 ePct = 5;
+        yieldOracle.setPrice(q * (100 + ePct) / 100 * 1e18);
+        uint256 snap = vm.snapshotState();
+        uint256 cleanHonest = _redeem(honest, vault.balanceOf(honest)); // no-attacker counterfactual
+        vm.revertToState(snap);
+
+        uint256 s = _deposit(attacker, 1000 ether);
+        int256 pnlDisc = int256(_redeem(attacker, s)) - int256(1000 ether);
+        uint256 dirtyHonest = _redeem(honest, vault.balanceOf(honest));
+        uint256 honestLoss = cleanHonest > dirtyHonest ? cleanHonest - dirtyHonest : 0;
+
+        emit log_named_int("mismatch, NO discount: attacker PnL (wei)", pnlNoDisc);
+        emit log_named_int("mismatch + 5% discount: attacker PnL (wei)", pnlDisc);
+        emit log_named_uint("honest realized, clean", cleanHonest);
+        emit log_named_uint("honest realized, dirty (deposited 10e18)", dirtyHonest);
+
+        // (1) Both conditions are required: the mismatch alone extracts nothing.
+        assertLe(pnlNoDisc, int256(2), "mismatch alone (no discount) extracted value");
+        // (2) Combined, it extracts, zero-sum from holders.
+        assertGt(pnlDisc, int256(0), "combined case did not extract");
+        assertGe(
+            honestLoss, uint256(pnlDisc), "holders should lose at least the attacker's gain (rest is fee friction)"
+        );
+        // (3) Harm is still bounded by the divergence gap (≤ e% of the holder's claim) — same bound as the
+        //     matched case; the difference is only that it lands on principal.
+        assertLe(honestLoss * 100, cleanHonest * ePct, "harm exceeds the divergence gap");
+        // (4) It DOES reach principal (the documented exception): honest dips below the deposited 10e18.
+        assertLt(dirtyHonest, 10 ether, "expected the differently-levered discount to reach principal");
+    }
+
+    /// @notice The sell side is dead (A1): a shareholder's redeem payout is independent of the yield mark.
+    ///         Redeeming at a stale-HIGH or stale-LOW mark pays exactly what a fair mark pays — the payout
+    ///         is the DEX-realized value of the slice, never the mark. So you can't be over- or under-paid
+    ///         on the way OUT by a diverged mark, in either direction; the whole attack surface is the
+    ///         deposit side. (Assumes the DEX is the true price — a depressed DEX is Exit_InKindFloors*.)
+    function test_Exit_RedeemMarkIndependent() public {
+        MockSwapRouter router = _pricedDex(1800e36, 1e18);
+        router.setRate(address(FUSDEV), address(PYUSD0), 1.5e18);
+        router.setRate(address(PYUSD0), address(FUSDEV), uint256(1e18) * 1e18 / 1.5e18);
+        marketOracle.setPrice(1800e36);
+        yieldOracle.setPrice(1.5e18 * 1e18);
+        _deposit(honest, 10 ether);
+        uint256 as_ = _deposit(attacker, 10 ether);
+
+        uint256 base = vm.snapshotState();
+        uint256 fairOut = _redeem(attacker, as_); // fair mark
+        vm.revertToState(base);
+
+        base = vm.snapshotState();
+        yieldOracle.setPrice(1.575e18 * 1e18); // stale-HIGH mark
+        uint256 highOut = _redeem(attacker, as_);
+        vm.revertToState(base);
+
+        yieldOracle.setPrice(1.35e18 * 1e18); // stale-LOW mark
+        uint256 lowOut = _redeem(attacker, as_);
+
+        emit log_named_uint("redeem @ fair mark", fairOut);
+        emit log_named_uint("redeem @ stale-high mark", highOut);
+        emit log_named_uint("redeem @ stale-low mark", lowOut);
+        assertApproxEqAbs(highOut, fairOut, 2, "redeem paid off a stale-HIGH mark - sell-side exploit");
+        assertApproxEqAbs(lowOut, fairOut, 2, "redeem paid off a stale-LOW mark - sell-side exploit");
     }
 
     /// @notice Long-horizon REGENERATION variant of the oscillation test: real yield accrues each round,
@@ -631,6 +774,10 @@ contract StalePriceArbTest is StalePriceArbBase {
     ///         the same slice through the DEX). Under a DEX discount, asserts the two exits
     ///         deliver equal value (WETH-equivalent, to ~1 wei) — so the redeem-based
     ///         bounds above also apply to the redeemInKind exit.
+    ///         Pins the WITHDRAW side: `redeem` pays out the DEX-realized value of your slice, not an
+    ///         internal mark — so you can't be over/under-paid by a stale mark on the way out. ("True" here
+    ///         = the DEX price, i.e. assumes the DEX is accurate; a depressed/manipulated DEX is floored by
+    ///         Exit_InKindFloorsDepressedRedeem, where holding the tokens beats selling into the bad pool.)
     function test_Exit_InKindEqualsRedeem() public {
         MockSwapRouter router = _pricedDex(WETH_PRICE, 1e18);
         uint256 hs = _deposit(honest, 10 ether);
