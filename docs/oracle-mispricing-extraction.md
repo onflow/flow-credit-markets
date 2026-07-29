@@ -9,7 +9,7 @@ scope.*
 
 **Summary.** The mechanism is simpler than it looks: a `deposit` mints shares against the **oracle-priced
 NAV**, while a `redeem` returns a **pro-rata slice of the real tokens** at the market price — so deposited
-**principal (a token count) is untouchable by any oracle**, and the only term an oracle prices, and therefore
+**principal (a token count) is essentially untouchable** (one bounded exception — §3), and the only term an oracle prices, and therefore
 the only thing a stale-price attacker can skim, is the **carry** (the levered yield net of debt). The attack
 is then **stale-price arbitrage**: deposit while that carry is mismarked (a stale collateral oracle, or a
 yield mark diverged from where it trades), redeem once it corrects, keep the gap. Risk-free (one atomic
