@@ -7,9 +7,11 @@ legitimate operations can extract value, across all surfaces); that is a separat
 whole-surface claim here defers to it. Liquidation, a yield de-peg, and sustained negative carry are out of scope — those are the leveraged
 position losing value (solvency / credit), not a mispriced share being arbitraged.*
 
-**Summary.** The mechanism is simpler than it looks: a `deposit` mints shares against the **oracle-priced
+**Summary.** **This can't drain the vault** — worst case, an attacker skims a small, self-limiting slice of
+the vault's recent *yield* during a stale-price window (one bounded edge can nick principal by a few percent),
+and it vanishes once the price feed is kept fresh. Why: a `deposit` mints shares against the **oracle-priced
 NAV**, while a `redeem` returns a **pro-rata slice of the real tokens** at the market price — so deposited
-**principal (a token count) is essentially untouchable** (one bounded exception — §3), and the only term an oracle prices, and therefore
+**principal (a token count) is essentially untouchable**, and the only term an oracle prices, and therefore
 the only thing a stale-price attacker can skim, is the **carry** (the levered yield net of debt). The attack
 is then **stale-price arbitrage**: deposit while that carry is mismarked (a stale collateral oracle, or a
 yield mark diverged from where it trades), redeem once it corrects, keep the gap. Risk-free (one atomic
