@@ -132,8 +132,7 @@ by the gap:
   not a standing drain *(`Source_DifferentlyLeveredDiscountReachesPrincipal`; R24)*.
 
 Both are fuzzed (discount to 90%, premium to +100%) in `Source_YieldDivergenceWithinGap`, which caps
-honest harm at the gap. The one pure-timing play — an appreciation sandwich — is bounded by that same gap
-regardless.
+honest harm at the gap.
 
 **Manufacturing a gap doesn't pay — self-extraction loses, and a bystander can opt out.** The mark isn't
 tradeable (it's `convertToAssets`, not the pool), so the only lever is pushing the DEX pool — which costs the
