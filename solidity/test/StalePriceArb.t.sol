@@ -27,7 +27,7 @@ import {MockOracle} from "./mocks/MockOracle.sol";
 ///                                     Source_YieldDivergenceWithinGap (fuzz) Py mark-vs-DEX gap: harm ≤ gap (both dirs)
 ///                                     Source_DifferentlyLeveredDiscountReachesPrincipal  differently-levered + discount: harm ≤ gap BUT reaches principal (needs both; R24)
 ///                                     Source_CombinedWithinComposedGap (fuzz) Pc + Py at once: bounds compose, no blow-up
-///           C. Amplifiable, per AXIS? Core_ProfitConcaveInSize           size: interior max, then negative, peak < 1 WETH
+///           C. Amplifiable, per AXIS? Core_ProfitConcaveInSize           size: interior max, then net-negative (concave)
 ///                                     Repetition_CollateralOscillationDoesNotCompound time: Pc jitter saturates (carry Pc-independent)
 ///                                     Repetition_YieldOscillationDoesNotCompound      time: Py mark jitter saturates (redeem oracle-free, A1)
 ///                                     Repetition_YieldRegenTaxNotPrincipal            time: real up-trend, δ-tax on yield, never principal
@@ -199,20 +199,16 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertGt(nOpt, nBig, "a larger attack was more profitable (not concave)");
         // Scaling far past the optimum is net-negative: unbounded size does not help.
         assertLt(nHuge, 0, "a very large attack still profited");
-        // The maximum extractable is bounded (here < 1 WETH on the whole cycle).
-        assertLt(nOpt, 1 ether, "peak profit exceeded the bound");
+        // (No absolute WETH cap asserted — the peak is a test-scale artifact; the scale-free ceiling is
+        // π < Δ. The property here is the shape: an interior maximum, net-negative once oversized.)
     }
 
-    /// @notice Past the δ cap the collateral crash puts the position underwater, and NO exit path
-    ///         completes — so a bigger move yields no bigger extraction (it can't be cashed out).
-    ///         This closes the domain past the fuzz cap. Uses MockMorpho's opt-in HF enforcement
-    ///         (default off; real Morpho reverts `withdrawCollateral` at HF < 1). Confirms: (a) the
-    ///         whole fuzz range is genuinely redeemable (redeem succeeds AT the cap — empirically it
-    ///         stays solvent to ~31%, so the cap sits inside it); (b) a deep crash reverts `redeem`
-    ///         AND `redeemInKind` (both do a pro-rata `withdrawCollateral`, which the absolute HF
-    ///         check rejects while underwater). The Case-B redeem path fails there too — its flash
-    ///         loan can't be repaid from collateral worth less than the debt — so the self-cap is
-    ///         complete, not Case-A-specific.
+    /// @notice Past the δ cap the crash puts the position underwater and NO exit completes, so a bigger move
+    ///         yields no bigger extraction — closing the domain past the fuzz cap. Under MockMorpho's real
+    ///         HF ≥ 1 gate, confirms: (a) redeem succeeds AT the cap (so the whole fuzz range is genuinely
+    ///         redeemable, not a lenient-mock artifact); (b) a deep crash reverts `redeem` AND `redeemInKind`
+    ///         (both do a pro-rata `withdrawCollateral` the HF check rejects underwater), and the Case-B
+    ///         flash-loan path fails too — so the self-cap is complete, not Case-A-specific.
     function test_Core_PastCapExitReverts() public {
         _pricedDex(WETH_PRICE, 1e18);
         _deposit(honest, 10 ether);
@@ -261,15 +257,13 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertLe(ext, 2, "balanced front-run must not extract");
     }
 
-    /// @notice A permissionless `rebalance()` interposed in the straddle cannot amplify extraction.
-    ///         `rebalance()` mints no shares to the caller (the only mint on that path is `_accrueFees`
-    ///         → `feeRecipient`), so the attacker's share fraction is fixed at deposit, and any swap cost
-    ///         is borne pro-rata — so `π_rebalance = π_plain − f·(cost) ≤ π_plain`. With a real gap present
-    ///         (carry, 27.5% stale-Pc drop → π_plain ≈ 1.11 WETH), inserting `rebalance()` at EITHER point
-    ///         — while Pc is still stale, or after it refreshes — changes the attacker's take by exactly 0
-    ///         and never touches principal. (Amplification is 0 whether the interposed rebalance fires — a
-    ///         NAV-per-share-neutral swap — or skips at the oracle-anchored limit; the `fA1 != fB1`
-    ///         diagnostic emitted below shows which occurred in this fixture.)
+    /// @notice A permissionless `rebalance()` interposed in the straddle cannot amplify extraction. It mints
+    ///         no shares to the caller (the only mint on that path is `_accrueFees` → `feeRecipient`), so the
+    ///         attacker's share fraction is fixed and any swap cost is pro-rata: `π_rebalance = π_plain − f·cost
+    ///         ≤ π_plain`. With a real gap present (carry + 27.5% stale-Pc drop → π_plain ≈ 1.11 WETH),
+    ///         interposing `rebalance()` at either point — Pc still stale, or after it refreshes — changes the
+    ///         take by 0 and never touches principal. (The `fA != fB` diagnostic shows whether the leg fired or
+    ///         skipped at the swap limit; amplification is 0 either way.)
     function test_Core_RebalanceDoesNotAmplify() public {
         uint256 kWad = 1.5e18; // carry present → a real gap to extract (π_plain > 0)
         MockSwapRouter router = _pricedDex(MIN_TRUE_PRICE, 1e18); // 27.5% drop = the stale-Pc gap
@@ -403,16 +397,12 @@ contract StalePriceArbTest is StalePriceArbBase {
         return without == 0 ? 0 : harm * 10000 / without;
     }
 
-    /// @notice Attacker *profitability* (distinct from honest *harm*, which the tests above bound
-    ///         and which is fee-independent — the attacker's DEX fees go to the pool's LPs, not
-    ///         back to honest holders). The DEX fee is only a PARTIAL offset, NOT the defense.
-    ///         The dominant round-trip legs (deposit lever, redeem unwind) trade on the yield/debt
-    ///         pool, whose fee is low (the vault uses a 1 bp tier here). At that fee the attack
-    ///         still nets a small POSITIVE profit (and it grows with δ); it only turns negative
-    ///         above a break-even of ~5-10 bps. So the fee does not make the cycle unprofitable
-    ///         at the vault's real pool fee — the operative controls are the staleness keeper
-    ///         and yield smearing driving δ->0, plus the never-principal harm ceiling above.
-    ///         Asserts the break-even bracket so the fee's true (limited) role is on the record.
+    /// @notice Attacker *profitability* (distinct from honest *harm*, which is fee-independent — the attacker's
+    ///         DEX fees go to the pool's LPs, not back to holders). The DEX fee is only a PARTIAL offset, not
+    ///         the defense: the dominant legs trade the low-fee yield/debt pool (1 bp here), where the attack
+    ///         still nets a small positive profit (growing with δ) and only flips negative above a ~5-10 bp
+    ///         break-even. So the operative controls are the staleness keeper (δ→0) and the never-principal
+    ///         ceiling, not the fee. Asserts the break-even bracket to put the fee's limited role on the record.
     function test_Control_DexFeeOnlyPartiallyOffsets() public {
         // Largest-δ point (27.5%); the effect is monotone in δ so this is the strongest case.
         uint256 price = MIN_TRUE_PRICE;
@@ -496,6 +486,10 @@ contract StalePriceArbTest is StalePriceArbBase {
         uint256 firstMove = ybStart > yb0 ? ybStart - yb0 : yb0 - ybStart;
         uint256 lastMove = ybPrev > ybLast ? ybPrev - ybLast : ybLast - ybPrev;
         assertLt(lastMove, firstMove / 100, "collateral composition still moving at horizon end - not converging");
+
+        // Principal floor on a REALIZED redeem (oracle-free, A1), mirroring the yield twin — so the claim
+        // doesn't rest on a mark-based preview alone.
+        assertGe(_redeem(honest, vault.balanceOf(honest)), 10 ether - 2, "collateral-jitter drain reached principal");
     }
 
     /// @notice YIELD-axis oscillation does not compound — the twin of the collateral case, and the one
@@ -562,18 +556,15 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertGe(realized, 10 ether - 2, "yield-jitter drain reached principal");
     }
 
-    /// @notice The one deposit/redeem path that reaches PRINCIPAL: a differently-levered deposit made while
-    ///         the yield mark reads ABOVE where the token trades (Py > Py_dex — the discount direction of §3,
-    ///         i.e. the yield valuation with no market sanity bound). It needs BOTH: a composition mismatch
-    ///         (vault under-levered vs the band midpoint, here left by a delever) AND the pool discount.
-    ///         Either alone extracts ~0; together, the deposit's cheaply-bought yield is credited at the high
-    ///         mark, over-mints, and dilutes holders — and because the deposit is levered unlike the book, the
-    ///         gap no longer cancels (A5 holds only for a uniform misprice), so it lands on PRINCIPAL. Harm is
-    ///         still bounded by the divergence gap (harm ≤ gap, as Source_YieldDivergenceWithinGap). Note the
-    ///         setup is a ZERO-CARRY vault (no accrual) — the no-buffer case: in a carrying vault the accrued
-    ///         carry absorbs the skim and it eats carry instead. So it reaches principal only when the mark
-    ///         holds no buffer (fresh vault, or convertToAssets that can dip rather than ratchet up — R12).
-    ///         Un-manufacturable (Manufacture_* ). Register R24.
+    /// @notice The one deposit/redeem path that reaches PRINCIPAL — a conditional edge, not a first-class
+    ///         finding. A deposit levered unlike the book during a yield-mark *discount* (mark above the DEX,
+    ///         §3): the cheaply-bought yield is credited at the high mark and over-mints, and because the
+    ///         deposit is levered unlike the book the misprice no longer cancels (A5 needs uniformity), so it
+    ///         lands on PRINCIPAL. Needs BOTH the skew and the discount — either alone extracts ~0. Assumes
+    ///         normal operation: a keeper rebalance() re-levers the skew first (un-rebalanced would relitigate
+    ///         liveness/liquidation, out of scope), and a residual survives because rebalance restores the HF
+    ///         band, not the leverage a fresh deposit assumes. Sweeps to the 90% in-scope divergence: harm ≤
+    ///         gap throughout, growing with it (~3% of NAV at 90%). Un-manufacturable; register R24.
     function test_Source_DifferentlyLeveredDiscountReachesPrincipal() public {
         uint256 q = 1.5e18; // pool rate for yield
         MockSwapRouter router = _pricedDex(1800e36, 1e18);
@@ -585,7 +576,8 @@ contract StalePriceArbTest is StalePriceArbBase {
         _deposit(honest, 10 ether);
 
         // Create the mismatch: crash Pc → HF below band → delever sells yield (pool under-dense), restore Pc.
-        marketOracle.setPrice(1500e36);
+        // Crash deep (1300) for a strong mismatch — a deeper delever leaves the vault further under-levered.
+        marketOracle.setPrice(1300e36);
         vault.rebalance();
         marketOracle.setPrice(1800e36);
 
@@ -596,36 +588,44 @@ contract StalePriceArbTest is StalePriceArbBase {
         uint256 sc = _deposit(attacker, 1000 ether);
         int256 pnlNoDisc = int256(_redeem(attacker, sc)) - int256(1000 ether);
         vm.revertToState(base);
-
-        // Combined — mismatch + a 5% discount (mark above pool). Over-mints, reaches principal, bounded by gap.
-        uint256 ePct = 5;
-        yieldOracle.setPrice(q * (100 + ePct) / 100 * 1e18);
-        uint256 snap = vm.snapshotState();
-        uint256 cleanHonest = _redeem(honest, vault.balanceOf(honest)); // no-attacker counterfactual
-        vm.revertToState(snap);
-
-        uint256 s = _deposit(attacker, 1000 ether);
-        int256 pnlDisc = int256(_redeem(attacker, s)) - int256(1000 ether);
-        uint256 dirtyHonest = _redeem(honest, vault.balanceOf(honest));
-        uint256 honestLoss = cleanHonest > dirtyHonest ? cleanHonest - dirtyHonest : 0;
-
-        emit log_named_int("mismatch, NO discount: attacker PnL (wei)", pnlNoDisc);
-        emit log_named_int("mismatch + 5% discount: attacker PnL (wei)", pnlDisc);
-        emit log_named_uint("honest realized, clean", cleanHonest);
-        emit log_named_uint("honest realized, dirty (deposited 10e18)", dirtyHonest);
-
-        // (1) Both conditions are required: the mismatch alone extracts nothing.
         assertLe(pnlNoDisc, int256(2), "mismatch alone (no discount) extracted value");
-        // (2) Combined, it extracts, zero-sum from holders.
-        assertGt(pnlDisc, int256(0), "combined case did not extract");
-        assertGe(
-            honestLoss, uint256(pnlDisc), "holders should lose at least the attacker's gain (rest is fee friction)"
-        );
-        // (3) Harm is still bounded by the divergence gap (≤ e% of the holder's claim) — same bound as the
-        //     matched case; the difference is only that it lands on principal.
-        assertLe(honestLoss * 100, cleanHonest * ePct, "harm exceeds the divergence gap");
-        // (4) It DOES reach principal (the documented exception): honest dips below the deposited 10e18.
-        assertLt(dirtyHonest, 10 ether, "expected the differently-levered discount to reach principal");
+
+        // Principal reference: honest's realized claim with no attacker (redeem is mark-independent, A1).
+        uint256 clean = _redeem(honest, vault.balanceOf(honest));
+        vm.revertToState(base);
+
+        // Each point: the attack extracts, is zero-sum from holders, reaches principal, and stays under the
+        // divergence gap; the hit grows with the gap. (`_leveredHit` interposes the keeper rebalance — natspec.)
+        uint16[3] memory ePcts = [uint16(5), 20, 90];
+        uint256 wideLoss;
+        for (uint256 i = 0; i < ePcts.length; i++) {
+            uint256 ePct = ePcts[i];
+            (int256 pnl, uint256 dirty) = _leveredHit(q * (100 + ePct) / 100 * 1e18);
+            vm.revertToState(base);
+            uint256 loss = clean > dirty ? clean - dirty : 0;
+
+            emit log_named_uint("discount %", ePct);
+            emit log_named_uint("  honest realized (principal 10e18)", dirty);
+
+            assertGt(pnl, int256(0), "combined case did not extract");
+            assertGe(loss, uint256(pnl), "holders should lose at least the attacker's gain");
+            assertLe(loss * 100, clean * ePct, "harm exceeds the divergence gap");
+            assertLt(dirty, 10 ether, "did not reach principal");
+            wideLoss = loss;
+        }
+        // At the wide (90%) end the hit is a few percent of principal — not "tiny".
+        assertGe(wideLoss, 0.1 ether, "wide-divergence principal hit too small");
+    }
+
+    /// @dev Realistic operation at yield `mark`: a keeper rebalance() re-levers the mismatch, then the
+    ///      attacker deposits 1000 and redeems. Returns the attacker PnL and honest's realized claim after.
+    ///      Caller snapshots/reverts around it.
+    function _leveredHit(uint256 mark) internal returns (int256 pnl, uint256 dirty) {
+        yieldOracle.setPrice(mark);
+        vault.rebalance();
+        uint256 s = _deposit(attacker, 1000 ether);
+        pnl = int256(_redeem(attacker, s)) - int256(1000 ether);
+        dirty = _redeem(honest, vault.balanceOf(honest));
     }
 
     /// @notice The sell side is dead (A1): a shareholder's redeem payout is independent of the yield mark.
