@@ -89,14 +89,13 @@ slice worth `P` at true prices (A1). So the attacker's profit `π = P − x` is 
 loss (with real fees, their loss ≥ the attacker's gain — §6) —
 bounding profit bounds the harm. *(`Core_LossWithinStalenessGap` checks gain ≈ loss.)*
 
-**Profit is capped by the gap.** A deposit `x` earns only a `x/(V̂+x)` share of the vault, so extraction is a *fraction* of the gap:
+**Profit is capped by the gap.** A deposit only ever earns a *fraction* of the vault, so it skims a fraction
+of the gap — never more:
 
-    π < Δ,
+    π < Δ.
 
-rising toward `Δ` as `x` grows (`x/(V̂+x) → 1`) but never past it. So more capital — leverage, flash loans — takes a
-bigger slice of the *same* gap; it never widens the gap. Net of trading costs it's worse still: the DEX
-fee grows with `x` (real price impact only sharpens it), so the attacker's net profit peaks at some size and
-then goes negative. *(`Core_LossWithinStalenessGap`: honest loss stays within `δ` of the holder's claim.
+More capital — leverage, flash loans — takes a bigger slice of the *same* gap; it never widens it. Net of
+fees it's worse still: the DEX fee grows with size, so a large attack peaks then turns net-negative. *(`Core_LossWithinStalenessGap`: honest loss stays within `δ` of the holder's claim.
 `Core_ProfitConcaveInSize`: net profit peaks at an interior size. `Core_OverMarkUnprofitable`: the
 opposite direction — vault *over*-valued — neither pays nor harms holders.)*
 
@@ -147,34 +146,19 @@ cross-term — but there's no blow-up (`Source_CombinedWithinComposedGap`).
 
 ## 4. Repeating the cycle over a long horizon
 
-The stale mark sticks around — a deposit doesn't refresh it — so the worry is a repeated, adversarially
-timed, possibly trending sequence draining the vault over time. **For a uniform mispricing, principal is
-unreachable on every single cycle** (A5): each `Δ` misprices only the carry, so the collateral token count
-`C` stays outside the surface no matter how many cycles run. What's left is the cumulative *carry* loss.
+A stale mark sticks around — a deposit doesn't refresh it — so the worry is a repeated, possibly trending
+sequence draining the vault over time. Two things bound it. **Principal is unreachable on every cycle** (A5):
+each `Δ` misprices only the carry, so the collateral token count `C` never enters the surface, however many
+cycles run.
 
-**Price motion can't refill the pot.** The extractable pot is the *standing* carry — finite, and
-value-conserving price motion and rebalancing add nothing to it. So repetition can't compound: the cumulative
-carry loss stays ≤ that one standing pot. The gap itself doesn't *close* — it persists; it just stops being
-**extractable** after the first cycle (a fresh deposit can no longer mint in below true value). This holds on
-**both** oracle axes: a `Pc` move re-marks a `Pc`-**independent** carry (`G = Y·Py − D`), injecting nothing;
-a yield-**mark** wobble only mis-prices the *mint* — redeem reads no oracle (A1).
-*(`Repetition_CollateralOscillationDoesNotCompound`, `Repetition_YieldOscillationDoesNotCompound`: 10 jitter
-cycles, extraction never accelerates (last ≤ first), cumulative ≤ ~2× a single event (a fixed-pot artifact at
-this N), principal intact, composition converging to a fixed point.)* The one yield motion that reaches
-principal — a genuine `convertToAssets` **de-peg** — is a real credit loss the attacker front-runs, not
-extraction (§7).
-
-**Real yield is the only refill.** The carry regenerates solely from genuine accrual (`Py` rising).
-Conservation — with A1 and A5 — caps the cumulative: the attacker can't transfer out more carry than the
-vault ever holds:
-
-    Σ πᵢ  ≤  (standing carry)  +  (real yield accrued).
-
-The standing-carry piece is taken at most once (the oscillation tests); the yield piece is bounded by what
-the vault genuinely earns (`Repetition_YieldRegenTaxNotPrincipal`), unbounded over infinite time only because
-cumulative yield is. It's a loose ceiling the tests sit inside, not a tight derivation — the formal
-conservation proof is the separate value-conservation review's (§7). Debt interest and harvest only *shrink*
-the pot, never amplify (harvest is code-inspected — it never fires in these tests).
+**And the carry pot doesn't compound.** What's extractable is the *standing* carry — a finite pot that
+price motion and rebalancing don't refill — so repeating the straddle can't stack: the gap persists but stops
+being extractable after the first cycle (a fresh deposit can no longer mint in below true value). It refills
+*only* from genuine yield accrual, so over the long run the drain is at most a small tax on the yield the
+vault actually earned — never principal. *(`Repetition_CollateralOscillationDoesNotCompound`,
+`Repetition_YieldOscillationDoesNotCompound`: jittered cycles, no per-round acceleration, principal intact.
+`Repetition_YieldRegenTaxNotPrincipal`: 200 rounds with real accrual, loss ≤ earned yield, realized principal
+floor held.)* A genuine `convertToAssets` de-peg is a credit loss the attacker front-runs, not extraction (§7).
 
 ## 5. Adjacent surfaces
 
