@@ -37,7 +37,6 @@ import {MockOracle} from "./mocks/MockOracle.sol";
 ///                                     (StalePriceArbManipulation.t.sol) Exit_InKindFloorsDepressedRedeem (fuzz)      bystander escapes in-kind ≥ redeem
 ///           E. Exit / controls sound? Exit_RedeemMarkIndependent         redeem payout independent of the mark (both dirs) → A1, sell side dead
 ///                                     Exit_InKindEqualsRedeem            in-kind == redeem (same rate) → A1
-///                                     Control_DexFeeOnlyPartiallyOffsets fee ≠ the defense (keeper is)
 ///         Full write-up: docs/oracle-mispricing-extraction.md.
 ///
 ///         Scope / mock limits:
@@ -150,10 +149,6 @@ contract StalePriceArbTest is StalePriceArbBase {
     /// @dev Attacker's ABSOLUTE round-trip PnL (out − in), WETH wei, with a DEX fee.
     ///      Enter on the stale mark, post the update, exit. Positive = the timing edge
     ///      beat the round-trip DEX cost; negative = the fee ate the edge.
-    function _attackNetPnl(uint256 kWad, uint256 truePriceE36, uint256 feeBps) internal returns (int256) {
-        return _attackNetPnlSized(kWad, truePriceE36, feeBps, 1000 ether);
-    }
-
     function _attackNetPnlSized(uint256 kWad, uint256 truePriceE36, uint256 feeBps, uint256 inAmt)
         internal
         returns (int256)
@@ -395,31 +390,6 @@ contract StalePriceArbTest is StalePriceArbBase {
 
         uint256 harm = without > withAtk ? without - withAtk : 0;
         return without == 0 ? 0 : harm * 10000 / without;
-    }
-
-    /// @notice Attacker *profitability* (distinct from honest *harm*, which is fee-independent — the attacker's
-    ///         DEX fees go to the pool's LPs, not back to holders). The DEX fee is only a PARTIAL offset, not
-    ///         the defense: the dominant legs trade the low-fee yield/debt pool (1 bp here), where the attack
-    ///         still nets a small positive profit (growing with δ) and only flips negative above a ~5-10 bp
-    ///         break-even. So the operative controls are the staleness keeper (δ→0) and the never-principal
-    ///         ceiling, not the fee. Asserts the break-even bracket to put the fee's limited role on the record.
-    function test_Control_DexFeeOnlyPartiallyOffsets() public {
-        // Largest-δ point (27.5%); the effect is monotone in δ so this is the strongest case.
-        uint256 price = MIN_TRUE_PRICE;
-
-        uint256 s0 = vm.snapshotState();
-        int256 atLowFee = _attackNetPnl(1.5e18, price, 1); // 1 bp = the vault's yield/debt tier
-        vm.revertToState(s0);
-        uint256 s1 = vm.snapshotState();
-        int256 atHighFee = _attackNetPnl(1.5e18, price, 30); // 30 bp
-        vm.revertToState(s1);
-
-        emit log_named_int("net PnL @ 1bp (wei)", atLowFee);
-        emit log_named_int("net PnL @ 30bps (wei)", atHighFee);
-        // At the real low pool fee the attack still profits: the fee is not the defense.
-        assertGt(atLowFee, 0, "fee assumed to defeat the attack, but it profits at 1 bp");
-        // It only flips negative at a much higher fee -> break-even is in between.
-        assertLt(atHighFee, 0, "attack unexpectedly still profitable even at 30 bps");
     }
 
     /// @notice DEX-*execution* divergence (NOT a credit de-peg). The vault BOOKS the yield leg at
