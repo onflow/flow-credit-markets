@@ -730,11 +730,10 @@ contract StalePriceArbTest is StalePriceArbBase {
         assertLe(lastExtraction, firstExtraction, "extraction accelerates as yield regenerates");
     }
 
-    /// @notice Both sources off at once: Pc stale by δ AND the yield DEX diverged from
-    ///         Py_oracle by d. Both mispricings hit the same carry term
-    ///         (Y·Py − D)/Pc, so this checks they COMPOSE rather than blow up: asserts
-    ///         the combined honest loss ≤ δ + d + δ·d (= (1+δ)(1+d) − 1 — additive to
-    ///         first order, at worst multiplicative in the factors).
+    /// @notice Both sources off at once: Pc stale by δ AND the yield DEX diverged by d. Both hit the same
+    ///         carry term (Y·Py − D)/Pc, so this checks they just ADD UP rather than amplify each other — the
+    ///         combined honest loss is no worse than the two gaps summed (δ + d, plus a negligible δ·d
+    ///         cross-term).
     function testFuzz_Source_CombinedWithinComposedGap(uint256 kWad, uint256 truePriceE36, uint256 pyDexWad) public {
         kWad = bound(kWad, 1e18, 2e18);
         truePriceE36 = bound(truePriceE36, MIN_TRUE_PRICE, WETH_PRICE); // δ ≤ ~27% (HF ≥ 1 region, as above)
