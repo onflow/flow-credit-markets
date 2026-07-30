@@ -53,6 +53,7 @@ library MarketLib {
     /// @dev Passes `shares = 0` so Morpho interprets the call as an asset-denominated borrow.
     /// Reverts inside Morpho if the resulting position would exceed LLTV.
     function borrow(MarketParams memory market, uint256 assets) internal {
+        // slither-disable-next-line unused-return -> asset-denominated borrow (shares=0); returned share/asset counts aren't needed
         MORPHO.borrow(market, assets, 0, address(this), address(this));
     }
 
@@ -69,7 +70,25 @@ library MarketLib {
         internal
         returns (uint256 assetsRepaid, uint256 sharesRepaid)
     {
+        // slither-disable-next-line unused-return -> return is forwarded but no caller consumes it; repay reverts on failure
         return MORPHO.repay(market, assets, 0, address(this), "");
+    }
+
+    /// @notice Repay the entire borrow position, by shares, so the debt is
+    ///         zeroed exactly.
+    /// @dev    Repaying by assets can't zero the position exactly: shares are far
+    ///         finer-grained than assets, so converting an asset amount back to
+    ///         shares either over-shoots (repaying `debt()` over-burns -> revert)
+    ///         or under-shoots (leaving dust borrow shares that block a
+    ///         full-collateral withdrawal). Repaying by shares clears it precisely.
+    ///         Morpho pulls the required loan token from this contract's balance,
+    ///         so the caller must pre-fund it.
+    /// @return assetsRepaid Loan token consumed to clear the position.
+    function repayAll(MarketParams memory market) internal returns (uint256 assetsRepaid) {
+        uint256 borrowShares = uint256(MORPHO.position(market.id(), address(this)).borrowShares);
+        if (borrowShares == 0) return 0;
+        // slither-disable-next-line unused-return -> sharesRepaid intentionally dropped; only assetsRepaid is needed
+        (assetsRepaid,) = MORPHO.repay(market, 0, borrowShares, address(this), "");
     }
 
     /// @notice Withdraw `assets` units of the collateral token from this
@@ -129,8 +148,7 @@ library MarketLib {
     function expectedDebt(MarketParams memory market) internal view returns (uint256) {
         uint256 borrowShares = uint256(MORPHO.position(market.id(), address(this)).borrowShares);
         if (borrowShares == 0) return 0;
-        (,, uint256 totalBorrowAssets, uint256 totalBorrowShares) =
-            MORPHO.expectedMarketBalances(market);
+        (,, uint256 totalBorrowAssets, uint256 totalBorrowShares) = MORPHO.expectedMarketBalances(market);
         return borrowShares.toAssetsUp(totalBorrowAssets, totalBorrowShares);
     }
 
@@ -149,22 +167,14 @@ library MarketLib {
     /// @notice Converts a collateral amount to its value in loan-token units at the current oracle price.
     /// @dev Does not apply LLTV; this is a raw value conversion. Use `maxBorrowFor` for the
     /// LLTV-discounted borrowable amount.
-    function collateralToDebt(MarketParams memory market, uint256 collateralAmount)
-        internal
-        view
-        returns (uint256)
-    {
+    function collateralToDebt(MarketParams memory market, uint256 collateralAmount) internal view returns (uint256) {
         if (collateralAmount == 0) return 0;
         return collateralAmount.mulDiv(oraclePrice(market), ORACLE_PRICE_SCALE);
     }
 
     /// @notice Converts a loan-token amount to its equivalent collateral-token amount at the current oracle price.
     /// @dev Inverse of `collateralToDebt`. Does not apply LLTV.
-    function debtToCollateral(MarketParams memory market, uint256 debtAmount)
-        internal
-        view
-        returns (uint256)
-    {
+    function debtToCollateral(MarketParams memory market, uint256 debtAmount) internal view returns (uint256) {
         if (debtAmount == 0) return 0;
         return debtAmount.mulDiv(ORACLE_PRICE_SCALE, oraclePrice(market));
     }
@@ -172,11 +182,7 @@ library MarketLib {
     /// @notice Returns the maximum loan-token amount borrowable against `collateralAmount` at the market's LLTV.
     /// @dev Equal to `collateralToDebt(collateralAmount) * lltv / WAD`. A position at exactly
     /// this debt level has a health factor of WAD (the liquidation threshold).
-    function maxBorrowFor(MarketParams memory market, uint256 collateralAmount)
-        internal
-        view
-        returns (uint256)
-    {
+    function maxBorrowFor(MarketParams memory market, uint256 collateralAmount) internal view returns (uint256) {
         return collateralToDebt(market, collateralAmount).mulDiv(market.lltv, WAD);
     }
 

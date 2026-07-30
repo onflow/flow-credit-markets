@@ -21,6 +21,69 @@ make cadence-test   # cadence tests only (requires the Flow CLI)
 ## Architecture
 See [Architecture](./docs/architecture.md)
 
+## Deployment
+
+Deployments are **manual** and target Flow mainnet directly — see the
+`mainnet-*` targets in the [`Makefile`](./Makefile) (every one has a `-dry`
+variant that fork-simulates against live state first). EVM deployments sign with
+a Foundry encrypted keystore account (set it up once with
+`make setup-evm-deployer`); the Cadence rebalancer signs with the
+`mainnet-deployer` Flow account (see below). Dependency addresses used at deploy
+time are pinned in
+[`solidity/deployments/mainnet.json`](./solidity/deployments/mainnet.json).
+
+### Cadence contract (VaultRebalancer)
+
+Automates `FCMVault.rebalance()` on an interval via `FlowTransactionScheduler`.
+The signer is the `mainnet-deployer` account in `flow.mainnet.json`. 
+This account becomes the resource owner and pays scheduling fees.
+The overlay is loaded only by the rebalancer `make` targets (via `-f`), so
+`flow test` / `make ci` never touch it. For `-dry`, start a forked emulator in a
+separate terminal with `make mainnet-fork-emulator`.
+
+`VAULT` is the FCMVault EVM address from the EVM deploy above:
+
+```bash
+make mainnet-deploy-rebalancer
+make mainnet-setup-rebalancer VAULT=0x… TICK_INTERVAL=3600.0 EVM_GAS_LIMIT=200000 EXECUTION_EFFORT=20000
+make mainnet-schedule-rebalancer VAULT=0x…
+```
+
+`mainnet-deploy-rebalancer` is idempotent (`--update`): re-running it ships an
+additive contract change in place, subject to Cadence contract-update validation.
+
+To tear a rebalancer down — cancel its pending tick (refunding the fee to the
+deployer's FlowToken vault), destroy the resource, and free its storage path so the
+same target can be re-created — use the remove target. This is the way to stop fee
+drain on an unused or misconfigured rebalancer:
+
+```bash
+make mainnet-remove-rebalancer VAULT=0x…
+```
+
+Calldata is hardcoded to `rebalance()` and scheduler priority to Medium.
+The deployer must hold enough FLOW for the per-tick scheduling fee plus the
+account storage minimum.
+
+### Deployed contracts (Flow EVM mainnet)
+
+| Contract | Address |
+| :--- | :--- |
+| FCMVault (WETH) | [`0x8c0567d42a824e11CFd7cE5a1F17Cfe6bAFCF657`](https://evm.flowscan.io/address/0x8c0567d42a824e11CFd7cE5a1F17Cfe6bAFCF657) |
+| FCMVault (WBTC) | [`0x25220b6E832Be6420aA80fFF5a5787369F3a7c8d`](https://evm.flowscan.io/address/0x25220b6E832Be6420aA80fFF5a5787369F3a7c8d) |
+| YieldTokenOracle (shared) | [`0x144F613490DD55C9844Ef139CFB9B63433dD349F`](https://evm.flowscan.io/address/0x144F613490DD55C9844Ef139CFB9B63433dD349F) |
+
+The prior WBTC vault ([`0x23179E15c1eA2d00848B03eC140B3a62A68589f1`](https://evm.flowscan.io/address/0x23179E15c1eA2d00848B03eC140B3a62A68589f1)) is superseded by the current one and remains redeemable. See the `mainnet-deploy-*` releases for full per-deploy records.
+
+### Deployed contracts (Flow mainnet — Cadence)
+
+| Contract | Account |
+| :--- | :--- |
+| VaultRebalancer | _not yet deployed_ |
+
+Morpho market (WETH collateral / PYUSD0 loan, LLTV 86%):
+`0xe9c0fc2a0c62a6e5cdee4bc4d06d571850a2add3bb7c96d8c3a75997cae6b866`
+
 ## Dependencies (Flow EVM mainnet)
 
 ### Morpho Blue
@@ -38,6 +101,32 @@ See [Architecture](./docs/architecture.md)
 | WBTC/USD | [`0x5B3e0BA14443B444D557C0C2F85592d88B88f5c8`](https://evm.flowscan.io/address/0x5B3e0BA14443B444D557C0C2F85592d88B88f5c8?tab=read_write_contract) |
 | WETH/USD | [`0xD744044044C0Dd0c73BeA440747115674Ebae030`](https://evm.flowscan.io/address/0xD744044044C0Dd0c73BeA440747115674Ebae030?tab=read_contract) |
 | WFLOW/USD | [`0xd8848Ccc8beA82046Da0B144844118db17086af4`](https://evm.flowscan.io/address/0xd8848Ccc8beA82046Da0B144844118db17086af4?tab=read_write_contract) |
+
+Update these Pyth feeds with the Foundry script. The script requires `curl`; `--ffi` lets
+Foundry invoke it to fetch the latest update from Hermes. Run without `--broadcast` first to
+simulate the update:
+
+```bash
+cd solidity
+forge script script/UpdatePythPrices.s.sol:UpdatePythPrices \
+  --rpc-url https://mainnet.evm.nodes.onflow.org \
+  --account "$ACCOUNT" \
+  --ffi
+```
+
+Then broadcast it:
+
+```bash
+forge script script/UpdatePythPrices.s.sol:UpdatePythPrices \
+  --rpc-url https://mainnet.evm.nodes.onflow.org \
+  --account "$ACCOUNT" \
+  --ffi \
+  --broadcast
+```
+
+Foundry prompts for the account's keystore password. Add `--sender "$SENDER"` if the sender cannot
+be inferred from the account. The account must hold enough FLOW to cover the dynamic Pyth update
+fee printed by the script plus gas. Per Price Feed is 0.5 FLOW. 
 
 ### ERC-20 tokens
 
@@ -62,3 +151,11 @@ Pools used by the vault (fetched via `Factory.getPool(tokenA, tokenB, fee)`):
 | PYUSD0 / Yield token | `100` (0.01%) |
 | WETH / PYUSD0 | `3000` (0.30%) |
 
+## ERC4626 Router
+
+Generic [ERC4626-Alliance](https://github.com/ERC4626-Alliance/ERC4626-Contracts) router for user-facing deposit/redeem slippage. Used by integrators, not a vault dependency — documented per-network rather than under the mainnet dependency list.
+
+| Network | Address |
+| :--- | :--- |
+| Mainnet | [`0xDc1A2Bf9E89fA176e56013b54A1377a39C753fA7`](https://evm.flowscan.io/address/0xDc1A2Bf9E89fA176e56013b54A1377a39C753fA7) |
+| Testnet | [`0x8e44a03b1019D4060c16f04103bB8942029E42bf`](https://evm-testnet.flowscan.io/address/0x8e44a03b1019D4060c16f04103bB8942029E42bf) |

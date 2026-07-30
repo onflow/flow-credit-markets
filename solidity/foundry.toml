@@ -11,9 +11,13 @@ remappings = [
     "yearn-erc4626-router/=lib/Yearn-ERC4626-Router/src/",
     "forge-std/=lib/forge-std/src/",
 ]
+fs_permissions = [{ access = "read", path = "./deployments" }]
+
+[rpc_endpoints]
+flow_mainnet = "https://mainnet.evm.nodes.onflow.org"
 
 [fmt]
-line_length = 100
+line_length = 120
 tab_width = 4
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

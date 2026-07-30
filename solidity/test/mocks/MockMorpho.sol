@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {Id, MarketParams, Position, Market} from "@morpho-blue/interfaces/IMorpho.sol";
 import {IIrm} from "@morpho-blue/interfaces/IIrm.sol";
+import {IMorphoFlashLoanCallback} from "@morpho-blue/interfaces/IMorphoCallbacks.sol";
 import {MarketParamsLib} from "@morpho-blue/libraries/MarketParamsLib.sol";
 import {MathLib} from "@morpho-blue/libraries/MathLib.sol";
 
@@ -31,19 +32,14 @@ contract MockMorpho {
         uint256 elapsed = block.timestamp - m.lastUpdate;
         if (elapsed != 0 && m.totalBorrowAssets != 0) {
             uint256 rate = IIrm(mp.irm).borrowRateView(mp, m);
-            uint256 interest =
-                uint256(m.totalBorrowAssets).wMulDown(rate.wTaylorCompounded(elapsed));
+            uint256 interest = uint256(m.totalBorrowAssets).wMulDown(rate.wTaylorCompounded(elapsed));
             m.totalBorrowAssets += uint128(interest);
         }
         m.lastUpdate = uint128(block.timestamp);
     }
 
-    function supplyCollateral(
-        MarketParams memory mp,
-        uint256 assets,
-        address onBehalf,
-        bytes calldata
-    ) external {
+    function supplyCollateral(MarketParams memory mp, uint256 assets, address onBehalf, bytes calldata) external {
+        require(assets != 0, "ZERO_ASSETS");
         Id id = mp.id();
         position[id][onBehalf].collateral += uint128(assets);
         IERC20(mp.collateralToken).transferFrom(msg.sender, address(this), assets);
@@ -56,14 +52,15 @@ contract MockMorpho {
         /*shares*/
         address onBehalf,
         address receiver
-    ) external returns (uint256, uint256) {
+    )
+        external
+        returns (uint256, uint256)
+    {
         Id id = mp.id();
         Market storage m = market[id];
 
         uint256 newShares = _mulDivUp(
-            assets,
-            uint256(m.totalBorrowShares) + VIRTUAL_SHARES,
-            uint256(m.totalBorrowAssets) + VIRTUAL_ASSETS
+            assets, uint256(m.totalBorrowShares) + VIRTUAL_SHARES, uint256(m.totalBorrowAssets) + VIRTUAL_ASSETS
         );
 
         position[id][onBehalf].borrowShares += uint128(newShares);
@@ -86,25 +83,30 @@ contract MockMorpho {
     ///         mock-only safeguard against rounding overshoot on full repay;
     ///         real Morpho enforces this via its accounting invariants. The
     ///         `shares` and `data` parameters are ignored.
-    function repay(
-        MarketParams memory mp,
-        uint256 assets,
-        uint256,
-        /*shares*/
-        address onBehalf,
-        bytes calldata
-    ) external returns (uint256, uint256) {
+    function repay(MarketParams memory mp, uint256 assets, uint256 shares, address onBehalf, bytes calldata)
+        external
+        returns (uint256, uint256)
+    {
         Id id = mp.id();
         Market storage m = market[id];
 
-        uint256 sharesToBurn = _mulDivUp(
-            assets,
-            uint256(m.totalBorrowShares) + VIRTUAL_SHARES,
-            uint256(m.totalBorrowAssets) + VIRTUAL_ASSETS
-        );
+        // Mirror Morpho: exactly one of (assets, shares) is set. By-shares repays a
+        // precise share count (assets rounded up); by-assets converts assets -> shares.
+        uint256 sharesToBurn;
+        if (shares > 0) {
+            sharesToBurn = shares;
+            assets = _mulDivUp(
+                shares, uint256(m.totalBorrowAssets) + VIRTUAL_ASSETS, uint256(m.totalBorrowShares) + VIRTUAL_SHARES
+            );
+        } else {
+            // Morpho rounds by-assets repay DOWN (toSharesDown).
+            sharesToBurn = _mulDivDown(
+                assets, uint256(m.totalBorrowShares) + VIRTUAL_SHARES, uint256(m.totalBorrowAssets) + VIRTUAL_ASSETS
+            );
+        }
+        // No clamp: like Morpho, over-burning more shares than the position holds
+        // underflows and reverts.
         uint128 posShares = position[id][onBehalf].borrowShares;
-        if (sharesToBurn > posShares) sharesToBurn = posShares;
-
         position[id][onBehalf].borrowShares = posShares - uint128(sharesToBurn);
         m.totalBorrowShares -= uint128(sharesToBurn);
         m.totalBorrowAssets = uint128(uint256(m.totalBorrowAssets) - assets);
@@ -123,12 +125,7 @@ contract MockMorpho {
     ///         needing HF-bound behavior should drive position state
     ///         explicitly. Redeem tests don't need it because they repay
     ///         debt before withdrawing collateral.
-    function withdrawCollateral(
-        MarketParams memory mp,
-        uint256 assets,
-        address onBehalf,
-        address receiver
-    ) external {
+    function withdrawCollateral(MarketParams memory mp, uint256 assets, address onBehalf, address receiver) external {
         Id id = mp.id();
         position[id][onBehalf].collateral -= uint128(assets);
         IERC20(mp.collateralToken).transfer(receiver, assets);
@@ -153,12 +150,9 @@ contract MockMorpho {
     /// @param  seizedCollateral Collateral units removed from the position.
     /// @param  repaidAssets     Loan-token debt repaid (reduces borrow shares
     ///                          and market totals).
-    function liquidate(
-        MarketParams memory mp,
-        address borrower,
-        uint256 seizedCollateral,
-        uint256 repaidAssets
-    ) external {
+    function liquidate(MarketParams memory mp, address borrower, uint256 seizedCollateral, uint256 repaidAssets)
+        external
+    {
         Id id = mp.id();
         Market storage m = market[id];
 
@@ -181,5 +175,19 @@ contract MockMorpho {
 
     function _mulDivUp(uint256 x, uint256 y, uint256 d) internal pure returns (uint256) {
         return (x * y + d - 1) / d;
+    }
+
+    function _mulDivDown(uint256 x, uint256 y, uint256 d) internal pure returns (uint256) {
+        return (x * y) / d;
+    }
+
+    /// @dev Mock of Morpho's `flashLoan`: mints `assets` of `token` to the
+    ///      borrower, invokes its `onMorphoFlashLoan` callback, then reclaims the
+    ///      `assets` (fee-free, like Morpho Blue) via the borrower's approval.
+    function flashLoan(address token, uint256 assets, bytes calldata data) external {
+        MockERC20(token).mint(msg.sender, assets);
+        IMorphoFlashLoanCallback(msg.sender).onMorphoFlashLoan(assets, data);
+        IERC20(token).transferFrom(msg.sender, address(this), assets);
+        MockERC20(token).burn(address(this), assets);
     }
 }
