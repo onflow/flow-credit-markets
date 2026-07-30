@@ -148,6 +148,7 @@ library MarketLib {
     function expectedDebt(MarketParams memory market) internal view returns (uint256) {
         uint256 borrowShares = uint256(MORPHO.position(market.id(), address(this)).borrowShares);
         if (borrowShares == 0) return 0;
+        // slither-disable-next-line unused-return -> only the borrow-side totals are read; the supply-side returns are intentionally ignored
         (,, uint256 totalBorrowAssets, uint256 totalBorrowShares) = MORPHO.expectedMarketBalances(market);
         return borrowShares.toAssetsUp(totalBorrowAssets, totalBorrowShares);
     }

@@ -1173,6 +1173,7 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
     ///         ERC4626-Alliance router), not by the vault or this preview. Rounds
     ///         down, matching `redeem`.
     function previewRedeem(uint256 shares) public view override returns (uint256) {
+        // slither-disable-next-line incorrect-equality -> exact-zero is the intended zero-shares guard
         if (shares == 0) return 0;
         uint256 claims = _totalClaims();
 
