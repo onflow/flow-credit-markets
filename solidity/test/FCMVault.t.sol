@@ -1186,6 +1186,39 @@ contract FCMVaultTest is Test {
         assertLt(FUSDEV.balanceOf(address(vault)), fusBefore, "yield consumed");
     }
 
+    /// @notice FLOWSCAC-9: harvest is keyed off NAV vs. collateral ("keep asset exposure
+    ///         at 100% of TVL", per README), not off a debt snapshot. A partial liquidation
+    ///         repays debt and seizes collateral without touching yield, opening the same
+    ///         kind of NAV/collateral gap harvest closes for any other source of surplus
+    ///         (e.g. organic yield growth) -- it's read directly off `totalAssets()` and
+    ///         `market.collateral()`, so it doesn't matter *why* the gap opened up.
+    function test_Rebalance_HarvestReadsGapFromNavNotDebtSnapshot() public {
+        marketOracle.setPrice(1e36);
+        _depositFor(user, 1 ether);
+
+        uint256 debtBefore = _debt();
+        uint256 collBefore = _collateral();
+        uint256 navBefore = vault.totalAssets();
+
+        // Repay 10% of the debt; seize a larger 6% of collateral (a liquidation bonus
+        // paid to the liquidator) -- a real NAV loss, not just a relabeling of debt.
+        uint256 repaidAssets = debtBefore * 10 / 100;
+        uint256 seizedCollateral = collBefore * 6 / 100;
+        _liquidate({seizedCollateral: seizedCollateral, repaidAssets: repaidAssets});
+
+        uint256 navAfterLiquidation = vault.totalAssets();
+        assertLt(navAfterLiquidation, navBefore, "liquidation itself costs NAV (the incentive/bonus)");
+        uint256 collAfterLiquidation = _collateral();
+        assertLt(collAfterLiquidation, navAfterLiquidation, "collateral now under-represents NAV");
+
+        vault.rebalance();
+
+        // Harvest closed (most of) the NAV/collateral gap by selling yield into collateral --
+        // the same target used for any other surplus, sized off NAV rather than a debt read.
+        assertGt(_collateral(), collAfterLiquidation, "harvest added collateral toward 100% exposure");
+        assertApproxEqRel(_collateral(), vault.totalAssets(), 0.02e18, "collateral back near 100% of NAV");
+    }
+
     /// @notice Constructor rejects malformed band configs: the HF band/targets
     ///         (`WAD <= min <= minTarget <= maxTarget <= max`; a below-WAD min would
     ///         allow rebalancing into a liquidatable position) and the yield-factor

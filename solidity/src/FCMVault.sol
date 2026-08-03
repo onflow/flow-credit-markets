@@ -1010,21 +1010,28 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         if (repaid > 0) market.repay(repaid);
     }
 
-    /// @dev Harvest leg of `rebalance` (internal; runs first). Realize surplus yield:
-    ///      sell the yield held above what the debt needs and supply the proceeds as
-    ///      collateral. NAV-neutral apart from swap costs. Add-only (no withdraw, no
-    ///      borrow) — it never increases leverage, so no flash loan is needed and it
-    ///      cannot push the position toward liquidation. No-op when the yield factor
-    ///      `rho = yieldValue / debt` is within the band (`rho <= yieldFactorMax` — before
-    ///      enough surplus accrues, or a yield depeg), or while a recovery is pending.
+    /// @dev Harvest leg of `rebalance` (internal; runs first). Implements the vault's
+    ///      documented job: "automated adjustment to keep asset exposure at 100% [of TVL]"
+    ///      (see README). `totalAssets()` (NAV) is the vault's fundamental accounting
+    ///      primitive -- collateral + yield − debt, all in asset terms -- so "100% asset
+    ///      exposure" is exactly `collateral == totalAssets()`. Sell the yield needed to
+    ///      close the NAV/collateral gap and supply the proceeds as collateral. NAV-neutral
+    ///      apart from swap costs. Add-only (no withdraw, no borrow) — it never increases
+    ///      leverage, so no flash loan is needed and it cannot push the position toward
+    ///      liquidation. No-op when collateral is within the band of NAV (`nav <= collateral
+    ///      * yieldFactorMax` — before enough surplus accrues, or a yield depeg), or while a
+    ///      recovery is pending.
     ///
     ///      Both legs (yield->loan, then loan->collateral) swap under an oracle-derived
     ///      `sqrtPriceLimitX96` (`maxSlippageBps` price-impact bound): each pool
     ///      partial-fills up to its limit and the leg is skipped when the pool is
     ///      already past it, so harvest never reverts the rebalance or blocks the
     ///      delever leg. Any surplus the second leg does not convert to collateral is
-    ///      repaid as debt, capped at the debt outstanding -- loan token idles only in
-    ///      the extreme where the realized surplus exceeds the whole debt.
+    ///      repaid as debt, capped at the debt outstanding so it can't over-repay and
+    ///      revert. With only a yield/loan pool and a loan/collateral pool available (no
+    ///      direct yield/collateral route), leg 2 can partial-fill independently of leg 1,
+    ///      leaving loan-token dust that `totalAssets` doesn't count while idle; repaying
+    ///      it is the only way to fold that value back into NAV.
     ///
     ///      The two legs treat a partial fill differently. Leg 1's unsold surplus stays as
     ///      yield and is retried next harvest; leg 2's is one-way -- loan it cannot convert
@@ -1037,20 +1044,26 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         // Frozen while a recovery is pending or executed: don't reshape the position
         // (yield -> collateral) while it is being wound down.
         if (recoveryValidAt != 0 || recovered) return;
-        uint256 currentDebt = market.debt();
 
+        // 100% asset exposure means collateral == NAV. Fire only when collateral has
+        // drifted more than yieldFactorMax's margin below that (same band edge as
+        // before, now read directly off NAV instead of re-derived from debt alone).
+        uint256 expectedCollateral = totalAssets();
+        uint256 currentCollateral = market.collateral();
+        if (expectedCollateral <= currentCollateral.mulDiv(yieldFactorMax, MarketLib.WAD)) return;
+
+        uint256 currentDebt = market.debt();
         uint256 yieldPrice = IOracle(yieldOracle).price();
         uint256 yieldBalance = yieldToken.balanceOf(address(this));
 
-        // Yield needed to back the debt at oracle value; only the excess is harvestable
-        // surplus. Selling just the excess keeps the yield leg's oracle value >= debt, so
-        // the unwind invariant is unchanged.
-        uint256 yieldForDebt = currentDebt.mulDiv(MarketLib.ORACLE_PRICE_SCALE, yieldPrice);
-        // Fire only when the yield factor is above the band's upper edge: yieldBalance >
-        // yieldForDebt * yieldFactorMax / WAD (equivalently rho > yieldFactorMax). Then realize
-        // back down to yieldForDebt (rho = 1, bare backing).
-        if (yieldBalance <= yieldForDebt.mulDiv(yieldFactorMax, MarketLib.WAD)) return;
-        uint256 yieldToHarvest = yieldBalance - yieldForDebt;
+        // Convert the NAV/collateral gap (asset units) to the equivalent yield-token
+        // amount to sell: asset -> loan-token value via the market oracle, then
+        // loan-token value -> yield-token units via the yield oracle.
+        uint256 gapInLoan = market.collateralToDebt(expectedCollateral - currentCollateral);
+        uint256 yieldToHarvest = gapInLoan.mulDiv(MarketLib.ORACLE_PRICE_SCALE, yieldPrice);
+        if (yieldToHarvest > yieldBalance) yieldToHarvest = yieldBalance;
+        // slither-disable-next-line incorrect-equality -> exact-zero guard: nothing to sell, so skip
+        if (yieldToHarvest == 0) return;
 
         uint256 loanBefore = loanToken.balanceOf(address(this));
 
