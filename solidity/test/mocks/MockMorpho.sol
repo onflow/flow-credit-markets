@@ -23,9 +23,9 @@ contract MockMorpho {
     uint256 internal constant VIRTUAL_ASSETS = 1;
 
     /// @dev Off by default (existing tests rely on the lenient behavior). When on,
-    ///      `withdrawCollateral` enforces Morpho's post-state health-factor ≥ 1 check,
-    ///      so tests can exercise the underwater / past-δ-cap regime where real Morpho
-    ///      would revert a pro-rata (Case-A) redeem.
+    ///      `withdrawCollateral` enforces Morpho's post-state health-factor >= 1 check,
+    ///      so tests can exercise the underwater / past-cap case where real Morpho
+    ///      would revert a pro-rata redeem.
     bool public enforceHf;
 
     function setEnforceHf(bool on) external {
@@ -117,7 +117,7 @@ contract MockMorpho {
     /// @notice Mock for Morpho's `withdrawCollateral`. Decrements the
     ///         position's collateral balance and transfers the collateral
     ///         token to `receiver`.
-    /// @dev    The real Morpho enforces post-state health factor ≥ 1 here,
+    /// @dev    The real Morpho enforces post-state health factor >= 1 here,
     ///         rejecting withdrawals that would put the position
     ///         under-collateralized. This mock skips that check; tests
     ///         needing HF-bound behavior should drive position state

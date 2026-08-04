@@ -8,17 +8,20 @@ import {StalePriceArbBase} from "./StalePriceArbBase.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockStatefulCpmmRouter} from "./mocks/MockStatefulCpmmRouter.sol";
 
-/// @title Manufactured Py-divergence via the unfloored deposit/redeem legs
-/// @notice The attacker *creates* a Py_oracle-vs-Py_dex divergence by trading the yield pool (rather
-///         than waiting for staleness), then extracts through deposit/redeem. Two results:
-///           - Manufacture_SelfExtractionUnprofitable: the manufacturing cost (convex) outruns the
-///             maxTvl-bounded self-extraction — net PnL, marked at the TRUE price so the manipulation
-///             slippage counts, is negative at every size and depth. No profitable size exists.
-///           - Exit_InKindFloorsDepressedRedeem: a fuzzed floor showing a holder exiting via redeemInKind
-///             (oracle-free, DEX-free) is never worse than the plain-redeem victim under a manufactured
-///             depression, over the materially-depressed band swept by the manipulation size.
-///         The stateful CPMM mock moves on trades, so manipulation carries real, depth-dependent cost.
-///         Full treatment: docs/oracle-mispricing-extraction.md §3.
+/// @title Manufactured yield divergence via the unfloored deposit/redeem legs
+/// @notice Instead of waiting for staleness, the attacker creates the gap between the yield mark
+///         and the yield DEX price by trading the pool, then extracts through deposit/redeem. Two
+///         results:
+///           - Manufacture_SelfExtractionUnprofitable: the cost of manufacturing the gap outruns
+///             the maxTvl-bounded self-extraction. Net PnL, marked at the true price so the
+///             manipulation slippage counts against the attacker, is negative at every size and
+///             depth. No profitable size exists.
+///           - Exit_InKindFloorsDepressedRedeem: a fuzzed floor showing a holder exiting via
+///             redeemInKind (which reads no oracle and does no swap) is never worse than the
+///             plain-redeem victim under a manufactured depression, over the range where the pool
+///             is materially depressed.
+///         The stateful CPMM mock moves on trades, so manipulation carries a real, depth-dependent
+///         cost. Background: docs/oracle-mispricing-extraction.md §3.
 contract StalePriceArbManipulationTest is StalePriceArbBase {
     // Larger than the sister suite's cap (1e24): the self-extraction size sweep needs the deposit
     // legs to be flow-bounded here, not TVL-capped, so the manufacturing cost is what dominates.
@@ -36,7 +39,7 @@ contract StalePriceArbManipulationTest is StalePriceArbBase {
     // ---- helpers -------------------------------------------------------
 
     function _seedPools(uint256 fusdevDepth) internal {
-        // FUSDEV/PYUSD at 1:1 (Py_dex = Py_oracle = 1.0), tunable depth.
+        // FUSDEV/PYUSD at 1:1 (DEX price = mark = 1.0), tunable depth.
         router.setPool(address(FUSDEV), fusdevDepth, address(PYUSD0), fusdevDepth);
         // WETH/PYUSD very deep at 1:2000 so the collateral reconcile leg is ~frictionless.
         router.setPool(address(WETH), 1_000_000e18, address(PYUSD0), 2_000_000_000e18);
@@ -57,14 +60,14 @@ contract StalePriceArbManipulationTest is StalePriceArbBase {
         );
     }
 
-    /// @dev Attacker holdings marked at the TRUE (un-manipulated) price, in PYUSD units:
-    ///      WETH = 2000 PYUSD, FUSDEV = 1 PYUSD (peg). Residual tokens are valued at true
+    /// @dev Attacker holdings marked at the true (un-manipulated) price, in PYUSD units:
+    ///      WETH = 2000 PYUSD, FUSDEV = 1 PYUSD (peg). Residual tokens are valued at the true
     ///      price (conservative: assumes the attacker can exit them with no further impact).
     function _valueP(address who) internal view returns (uint256) {
         return WETH.balanceOf(who) * 2000 + PYUSD0.balanceOf(who) + FUSDEV.balanceOf(who);
     }
 
-    /// @dev Full manufacture-then-extract cycle, returning the attacker's TRUE-value net PnL
+    /// @dev Full manufacture-then-extract cycle, returning the attacker's true-value net PnL
     ///      (PYUSD units). The attacker is funded with the FUSDEV it dumps (counted in V0 at
     ///      true value, so the manipulation slippage shows up as a loss) plus the WETH it
     ///      deposits. Manipulation cost + vault extraction + residual are all captured.
@@ -91,18 +94,18 @@ contract StalePriceArbManipulationTest is StalePriceArbBase {
 
     // ---- tests ---------------------------------------------------------
 
-    /// @notice A SELF-contained manufacture-then-extract round trip does not pay. The attacker
-    ///         manufactures a Py_dex depression (dumping FUSDEV, eating the pool impact) and then
-    ///         extracts through its OWN deposit+redeem — whose size is bounded by `maxTvl`. The
-    ///         net PnL (marked at TRUE price, attacker-favorable) is negative across every
-    ///         manipulation size and pool depth, and grows more negative with size: the
-    ///         manufacturing round-trip cost outscales the flow-bounded self-extraction. The
-    ///         profit peak is below zero, so no profitable size exists.
+    /// @notice A self-contained manufacture-then-extract round trip doesn't pay. The attacker
+    ///         depresses the pool (dumping FUSDEV, eating the price impact) and then extracts through
+    ///         its own deposit+redeem, whose size is bounded by maxTvl. Net PnL, marked at the true
+    ///         price (attacker-favorable), is negative across every manipulation size and pool depth,
+    ///         and grows more negative with size: the round-trip manipulation cost outscales the
+    ///         flow-bounded self-extraction. The profit peak is below zero, so no profitable size
+    ///         exists.
     ///
-    ///         This covers the attacker extracting from THEMSELVES. Extraction from OTHER holders
-    ///         (whose redeems the attacker sandwiches at the manipulated price) scales with the
-    ///         victim's flow, not the attacker's — that surface is capped by `redeemInKind`, the
-    ///         oracle-free / DEX-free exit (testFuzz_Exit_InKindFloorsDepressedRedeem).
+    ///         This covers the attacker extracting from itself. Extraction from other holders (whose
+    ///         redeems the attacker sandwiches at the manipulated price) scales with the victim's
+    ///         flow, not the attacker's — that surface is capped by redeemInKind, the exit that reads
+    ///         no oracle and does no swap (testFuzz_Exit_InKindFloorsDepressedRedeem).
     function test_Manufacture_SelfExtractionUnprofitable() public {
         uint256[5] memory manips = [uint256(50_000e18), 200_000e18, 500_000e18, 1_000_000e18, 3_000_000e18];
         int256 shallowPeak = type(int256).min;
@@ -121,21 +124,21 @@ contract StalePriceArbManipulationTest is StalePriceArbBase {
         assertLe(deepPeak, 0, "self-extraction profitable (deep pool)");
     }
 
-    /// @notice `redeemInKind` is a *floor* on a DEX `redeem` under a manufactured depression. An attacker
-    ///         dumps FUSDEV into the stateful pool to depress Py_dex; a bystander honest holder then exits.
-    ///         A `redeem` sells the yield slice into the depressed pool and is shortchanged; `redeemInKind`
-    ///         hands over the raw slice, worth its true value. Fuzzes the manipulation size (which sweeps
-    ///         the depression depth Py_dex from ~0.96 down to ~0.39 at this seeded depth) and asserts the
-    ///         in-kind slice valued at true is never below the depressed redeem, over the materially-
-    ///         depressed band. Near par the two converge — that equality regime is `Exit_InKindEqualsRedeem`'s
-    ///         (see the bound note below).
+    /// @notice redeemInKind is a floor on a DEX redeem under a manufactured depression. An attacker
+    ///         dumps FUSDEV into the stateful pool to depress the DEX price; a bystander honest holder
+    ///         then exits. A redeem sells the yield slice into the depressed pool and is shortchanged;
+    ///         redeemInKind hands over the raw slice, worth its true value. Fuzzes the manipulation
+    ///         size (which sweeps the DEX price from ~0.96 down to ~0.39 at this seeded depth) and
+    ///         asserts the in-kind slice valued at true is never below the depressed redeem, over the
+    ///         range where the pool is materially depressed. Near par the two converge — that regime
+    ///         is Exit_InKindEqualsRedeem's job (see the bound note below).
     function testFuzz_Exit_InKindFloorsDepressedRedeem(uint256 manip) public {
         uint256 depth = 500_000e18;
-        // Floor is a *depressed-pool* claim: the lower bound sits inside the genuinely-depressed regime
-        // (Py_dex <~ 0.96). Below it the CPMM's deposit-time swap impact (baked into the carry) makes the
-        // plain redeem marginally beat the true-valued in-kind slice — that near-par convergence is the
-        // frictionless Exit_InKindEqualsRedeem's job, not this floor's.
-        manip = bound(manip, 10_000e18, 300_000e18); // sweeps Py_dex ~0.96 -> ~0.39
+        // The floor is a depressed-pool claim: the lower bound sits inside the genuinely-depressed
+        // range (DEX price below ~0.96). Below that, the CPMM's deposit-time swap impact (baked into
+        // the carry) makes the plain redeem marginally beat the true-valued in-kind slice — that
+        // near-par convergence is the frictionless Exit_InKindEqualsRedeem's job, not this floor's.
+        manip = bound(manip, 10_000e18, 300_000e18); // sweeps DEX price ~0.96 -> ~0.39
 
         // Path A: victim redeems through the manufactured-depressed DEX.
         uint256 snap = vm.snapshotState();
@@ -148,7 +151,7 @@ contract StalePriceArbManipulationTest is StalePriceArbBase {
         uint256 redeemValue = wethRedeem * 2000; // PYUSD units, true price
         vm.revertToState(snap);
 
-        // Path B: same depression, victim takes the raw slice via redeemInKind, valued at TRUE (FUSDEV @ 1).
+        // Path B: same depression, victim takes the raw slice via redeemInKind, valued at the true price (FUSDEV @ 1).
         _seedPools(depth);
         uint256 hB = _deposit(honest, 10 ether);
         MockERC20(address(FUSDEV)).mint(attacker, manip);
