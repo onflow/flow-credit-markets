@@ -840,8 +840,9 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
     /// @notice Drive the vault's leveraged Morpho position back inside the
     ///         `[healthFactorMin, healthFactorMax]` band and realize surplus yield above the
     ///         yield-factor band.
-    /// @dev    Two legs: `_harvest` (realize surplus) then `_adjustLeverage` (restore the
-    ///         band).
+    /// @dev    Two legs — `_harvest` (realize surplus) then `_adjustLeverage` (restore the
+    ///         band) — then a bounded, best-effort sweep of any residual loan token back
+    ///         into the yield leg, so no incidental loan balance is left outside NAV.
     function rebalance() external logsVaultState {
         // After a recovery the position is terminal; revert with an explicit
         // error so the off-chain rebalancer surfaces it and stops, rather than
@@ -852,6 +853,22 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         // harvest must run before _adjustLeverage
         _harvest();
         _adjustLeverage();
+
+        // Reconcile any residual loan token back into the accounted yield leg. NAV is
+        // built from the position legs (collateral + yield - debt), not incidental
+        // balances, so loan a swap leg leaves behind would sit outside NAV. Rather than
+        // count it (which would re-open the donation surface) or leave it there, convert
+        // it to yield. Bounded by the same oracle-derived price limit as the other legs
+        // and best-effort: if the pool is past the bound the swap is skipped and the
+        // residue is retried next call, so this never forces a trade at a bad rate.
+        uint256 looseLoan = loanToken.balanceOf(address(this));
+        if (looseLoan > 0) {
+            (uint160 sweepLimit, bool sweepOk) = _yieldDebtSwapLimit(address(loanToken));
+            if (sweepOk) {
+                // slither-disable-next-line unused-return -> best-effort sweep; the yield-out isn't needed here (it lands in the yield leg and is captured by NAV next tick)
+                SwapLib.swapExactInToLimit(address(loanToken), address(yieldToken), feeYieldDebt, looseLoan, sweepLimit);
+            }
+        }
     }
 
     /// @dev Leverage leg of `rebalance`, rebalancing only to the re-entry target just

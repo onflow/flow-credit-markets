@@ -931,6 +931,47 @@ contract FCMVaultTest is Test {
         assertEq(PYUSD0.balanceOf(address(vault)), 0, "no loan idle");
     }
 
+    // ---- loose-loan reconciliation sweep ---------------------------------
+
+    /// @notice `rebalance` ends by sweeping any residual loan token back into the
+    ///         accounted yield leg. Seed a loan-token residue (as a swap leg's
+    ///         favorable fill would leave), rebalance in-band, and the residue is
+    ///         converted to yield — nothing left outside NAV.
+    function test_Rebalance_SweepsResidualLoanToYield() public {
+        _depositFor(user, 1 ether);
+        // Position is at target after deposit: harvest/lever/delever are no-ops,
+        // so only the end-of-rebalance sweep acts.
+        uint256 residue = 5e18;
+        MockERC20(address(PYUSD0)).mint(address(vault), residue);
+        assertEq(PYUSD0.balanceOf(address(vault)), residue, "residue seeded");
+
+        uint256 fusBefore = FUSDEV.balanceOf(address(vault));
+        vault.rebalance();
+
+        assertEq(PYUSD0.balanceOf(address(vault)), 0, "residual loan swept out");
+        assertGt(FUSDEV.balanceOf(address(vault)), fusBefore, "residue converted to yield");
+    }
+
+    /// @notice The sweep is bounded + best-effort: when the yield/debt pool is past
+    ///         the slippage bound for buying yield (a loan->yield swap), the sweep is
+    ///         skipped, the residue is retained for a later call, and `rebalance` does
+    ///         not revert.
+    function test_Rebalance_SweepSkipsWhenSpotPastBound() public {
+        _depositFor(user, 1 ether);
+        uint256 residue = 5e18;
+        MockERC20(address(PYUSD0)).mint(address(vault), residue);
+
+        // Spot 2% below oracle: past the 1% bound for a price-lowering (buy-yield)
+        // swap, so the loan->yield sweep is skipped.
+        _setPoolPrice(98, 100);
+
+        uint256 fusBefore = FUSDEV.balanceOf(address(vault));
+        vault.rebalance(); // no revert
+
+        assertEq(PYUSD0.balanceOf(address(vault)), residue, "residue retained (sweep skipped)");
+        assertEq(FUSDEV.balanceOf(address(vault)), fusBefore, "no yield bought");
+    }
+
     // ---- partial rebalancing (price-impact pool) -------------------------
 
     /// @dev The price ratio `num/den` in Q64.192 fixed point (`num/den * 2**192`),
