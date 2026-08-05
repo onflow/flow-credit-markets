@@ -52,7 +52,6 @@ contract FCMVaultTest is Test {
     MockOracle internal marketOracle;
     MockOracle internal yieldOracle;
     MockUniswapV3Pool internal yieldPool;
-    MockUniswapV3Pool internal assetPool;
 
     address internal admin = address(0x12345);
     address internal user = address(0xA11CE);
@@ -75,9 +74,6 @@ contract FCMVaultTest is Test {
         // oracle so a rebalance's oracle-derived price limit sits on the
         // tradeable side of spot.
         yieldPool = new MockUniswapV3Pool();
-        // Asset/debt pool spot defaults to 1:1 (Q96); harvest tests set the market
-        // oracle to 1:1 so its leg-2 (loan->collateral) limit sits on the tradeable side.
-        assetPool = new MockUniswapV3Pool();
 
         vault = new FCMVault(
             FCMVault.InitParams({
@@ -90,7 +86,6 @@ contract FCMVaultTest is Test {
                 feeYieldDebt: FEE,
                 feeAssetDebt: FEE_ASSET_DEBT,
                 yieldDebtPool: address(yieldPool),
-                assetDebtPool: address(assetPool),
                 healthFactorMin: HEALTH_FACTOR_MIN,
                 healthFactorMax: HEALTH_FACTOR_MAX,
                 healthFactorMinTarget: HEALTH_FACTOR_MIN_TARGET,
@@ -105,6 +100,10 @@ contract FCMVaultTest is Test {
         );
         vm.prank(admin);
         vault.setMaxTvl(1e21);
+        // Large adaptive harvest cap by default so harvest tests realize the whole surplus in
+        // one call; AIMD-specific tests reset it lower to exercise the rate-limit/floor.
+        vm.prank(admin);
+        vault.setHarvestCap(1e24);
 
         // Pre-allow the addresses existing deposit tests use as receivers.
         // Gating-specific tests use fresh addresses (bob, carol, stranger).
@@ -1477,7 +1476,6 @@ contract FCMVaultTest is Test {
             feeYieldDebt: FEE,
             feeAssetDebt: FEE_ASSET_DEBT,
             yieldDebtPool: address(yieldPool),
-            assetDebtPool: address(assetPool),
             healthFactorMin: HEALTH_FACTOR_MIN,
             healthFactorMax: HEALTH_FACTOR_MAX,
             healthFactorMinTarget: HEALTH_FACTOR_MIN_TARGET,
@@ -1669,59 +1667,102 @@ contract FCMVaultTest is Test {
         assertEq(PYUSD0.balanceOf(address(vault)), 0, "no idle loan token");
     }
 
-    /// @notice Harvest's loan->collateral leg is oracle-floored like the first leg: when the
-    ///         asset/debt pool is priced past the slippage bound, the vault does not buy
-    ///         collateral at the mispriced rate. The leg is skipped and the realized surplus
-    ///         is repaid as debt instead (a deleverage), leaving no loan token idle.
-    function test_Rebalance_HarvestSkipsMispricedCollateralLeg() public {
+    /// @notice Revert-corner harvest: when leg 2 (loan->collateral) cannot clear the
+    ///         oracle-fair `amountOutMinimum`, `harvestStep` reverts as a whole and the
+    ///         surplus is *held*. Leg 1 is rolled back (no yield sold, no stranded loan), no
+    ///         collateral is bought, debt is untouched (no delever fallback), and the adaptive
+    ///         cap halves. The `try/catch` swallows the revert so `rebalance` still succeeds.
+    function test_Rebalance_HarvestRevertsAndHoldsBelowMinOut() public {
         marketOracle.setPrice(1e36);
         _depositFor(user, 1 ether);
         MockERC20(address(FUSDEV)).mint(address(vault), FUSDEV.balanceOf(address(vault)) / 20);
 
-        // First leg (yield->loan) trades on `yieldPool`, still at the oracle price, so the
-        // surplus is realized in loan token. The asset/debt pool, however, is dragged far past
-        // the bound, so the second leg (loan->collateral) cannot execute within tolerance.
-        assetPool.setSqrtPriceX96(uint160(_sqrtPriceX96(4, 1)));
+        // 5% haircut on the asset/debt pool exceeds the 1% slippage tolerance, so leg 2's
+        // output falls below the end-to-end min-out and the whole harvestStep reverts.
+        MockSwapRouter(address(SwapLib.SWAP_ROUTER)).setFeeBpsForPool(FEE_ASSET_DEBT, 500);
 
         uint256 collBefore = WETH.balanceOf(address(MORPHO));
+        uint256 yieldBefore = FUSDEV.balanceOf(address(vault));
         uint256 debtBefore = _debt();
+        uint256 capBefore = vault.harvestCap();
+
+        vault.rebalance(); // must not revert — harvest reverts internally, caught
+
+        assertApproxEqAbs(WETH.balanceOf(address(MORPHO)), collBefore, 1, "no collateral bought (harvest reverted)");
+        assertApproxEqAbs(FUSDEV.balanceOf(address(vault)), yieldBefore, 1, "surplus held (leg 1 rolled back)");
+        assertApproxEqAbs(_debt(), debtBefore, 1, "debt unchanged (no delever fallback)");
+        assertEq(PYUSD0.balanceOf(address(vault)), 0, "no stranded loan token");
+        assertLt(vault.harvestCap(), capBefore, "adaptive cap halved on revert");
+    }
+
+    /// @notice AIMD rate-limit: a surplus far larger than the cap is drained in
+    ///         capacity-bound chunks across successive `rebalance` calls, and each
+    ///         capacity-bound success grows the cap by 1/8 (probing for depth). No stranding.
+    function test_Harvest_AimdRateLimitsAndConvergesOverCalls() public {
+        marketOracle.setPrice(1e36);
+        _depositFor(user, 1 ether);
+        // Surplus far larger than the cap so `min(surplus, cap) == cap` (capacity-bound)
+        // for many calls.
+        MockERC20(address(FUSDEV)).mint(address(vault), 100e18);
+
+        // Cap at the floor (MIN_HARVEST == 1e18) so the large surplus is rate-limited.
+        vm.prank(admin);
+        vault.setHarvestCap(1e18);
+
+        uint256 capBefore = vault.harvestCap();
         uint256 yieldBefore = FUSDEV.balanceOf(address(vault));
 
         vault.rebalance();
+        uint256 capAfter1 = vault.harvestCap();
+        assertEq(capAfter1, capBefore + capBefore / 8, "cap grew 1/8 on capacity-bound success");
+        assertLt(FUSDEV.balanceOf(address(vault)), yieldBefore, "surplus draining");
+        assertEq(PYUSD0.balanceOf(address(vault)), 0, "no stranded loan");
 
-        assertLt(FUSDEV.balanceOf(address(vault)), yieldBefore, "surplus yield sold (first leg)");
-        assertApproxEqAbs(WETH.balanceOf(address(MORPHO)), collBefore, 1, "no collateral bought off-oracle");
-        assertLt(_debt(), debtBefore, "realized surplus repaid as debt (leg skipped)");
-        assertEq(PYUSD0.balanceOf(address(vault)), 0, "no idle loan token");
+        vault.rebalance();
+        vault.rebalance();
+        assertGt(vault.harvestCap(), capAfter1, "cap keeps growing while capacity-bound");
+        assertLt(FUSDEV.balanceOf(address(vault)), yieldBefore, "surplus continues to drain over calls");
+        assertEq(PYUSD0.balanceOf(address(vault)), 0, "still no stranded loan");
     }
 
-    /// @notice Harvest's loan->collateral leg partial-fills like the rebalance swaps: when
-    ///         the asset/debt pool can only absorb part of the realized surplus within the
-    ///         slippage bound, the vault buys what it can at tolerance, repays the remainder
-    ///         as debt, and leaves no loan token idle — the split-path accounting.
-    function test_Rebalance_HarvestPartialCollateralLegRepaysRemainder() public {
-        // Fair loan-per-collateral sits 0.7% below the CPMM's 1:1 spot, so leg 2's
-        // price-raising limit leaves only ~0.15% of pool depth of room while leg 1
-        // (yield oracle at spot) keeps its full 1% — leg 1 fills, leg 2 can't.
-        marketOracle.setPrice(0.993e36);
+    /// @notice On a revert (leg 2 misses the min-out) the cap halves each call and floors at
+    ///         `MIN_HARVEST` — it can never reach 0 and brick the harvest permanently.
+    function test_Harvest_MaxHarvestHalvesToFloorOnRepeatedReverts() public {
+        marketOracle.setPrice(1e36);
         _depositFor(user, 1 ether);
         MockERC20(address(FUSDEV)).mint(address(vault), FUSDEV.balanceOf(address(vault)) / 20);
 
-        // Shallow CPMM on all three tokens: leg 1's ~0.03e18 surplus fits its ~0.05e18
-        // cap (full fill), leg 2's cap is ~0.015e18 (partial fill).
-        _installCpmmRouter(10e18);
-        MockCpmmSwapRouter(address(SwapLib.SWAP_ROUTER)).setReserves(address(WETH), 10e18);
+        // Leg 2 always misses the min-out.
+        MockSwapRouter(address(SwapLib.SWAP_ROUTER)).setFeeBpsForPool(FEE_ASSET_DEBT, 500);
+
+        // 4x the floor so a few halvings reach it. (MIN_HARVEST == 1e18.)
+        vm.prank(admin);
+        vault.setHarvestCap(4e18);
+
+        vault.rebalance();
+        assertEq(vault.harvestCap(), 2e18, "halved once");
+        vault.rebalance();
+        assertEq(vault.harvestCap(), 1e18, "halved to the floor");
+        vault.rebalance();
+        assertEq(vault.harvestCap(), 1e18, "clamped at the floor, never below");
+    }
+
+    /// @notice The cap grows only on a *capacity-bound* success (`amountIn == cap`). A
+    ///         surplus-bound success (cap far above the surplus) harvests fully but must NOT
+    ///         grow the cap — the cap size was never exercised, so growing it would be fiction.
+    function test_Harvest_GrowsOnlyWhenCapacityBound() public {
+        marketOracle.setPrice(1e36);
+        _depositFor(user, 1 ether);
+        // Small surplus, cap left at the large setUp default -> surplus-bound.
+        MockERC20(address(FUSDEV)).mint(address(vault), FUSDEV.balanceOf(address(vault)) / 20);
 
         uint256 collBefore = WETH.balanceOf(address(MORPHO));
-        uint256 debtBefore = _debt();
-        uint256 yieldBefore = FUSDEV.balanceOf(address(vault));
+        uint256 capBefore = vault.harvestCap();
 
         vault.rebalance();
 
-        assertLt(FUSDEV.balanceOf(address(vault)), yieldBefore, "surplus yield sold (leg 1)");
-        assertGt(WETH.balanceOf(address(MORPHO)), collBefore, "some collateral bought within tolerance");
-        assertLt(_debt(), debtBefore, "unconverted remainder repaid as debt");
-        assertEq(PYUSD0.balanceOf(address(vault)), 0, "no idle loan token");
+        assertGt(WETH.balanceOf(address(MORPHO)), collBefore, "harvest succeeded (surplus-bound)");
+        assertEq(vault.harvestCap(), capBefore, "cap unchanged: no growth on a surplus-bound success");
     }
 
     /// @notice A surplus large enough to push hf past `healthFactorMax` triggers the
@@ -1851,10 +1892,10 @@ contract FCMVaultTest is Test {
         assertApproxEqAbs(FUSDEV.balanceOf(address(vault)), yieldBefore, 1, "harvest frozen: yield untouched");
     }
 
-    /// @notice With partial-fill swaps (#72), harvest can no longer block the delever: when
-    ///         the position is over-levered and the yield leg is thin, `rebalance` harvests
-    ///         best-effort (partial-fill, no revert) and then delevers in the same call, so
-    ///         the position's health improves rather than the whole tick reverting.
+    /// @notice Harvest cannot block the delever: the harvest runs inside a `try/catch`, so
+    ///         even when it reverts (here leg 2 can't clear the min-out at the deleveraged
+    ///         price) the revert is swallowed and `_adjustLeverage` still delevers in the same
+    ///         call — the position's health improves rather than the whole tick reverting.
     function test_Rebalance_HarvestDoesNotBlockDelever() public {
         marketOracle.setPrice(1e36);
         _depositFor(user, 1 ether);

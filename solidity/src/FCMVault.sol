@@ -79,10 +79,6 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
     /// @notice Pool fee tier for the asset/debt pool, used to reconcile
     ///         redeem surplus from loan token back to the underlying asset.
     uint24 public immutable feeAssetDebt;
-    /// @notice FlowSwap V3 asset/debt pool for the harvest loan->collateral leg. Its
-    ///         live `slot0` price is read to bound leg 2 to the market oracle, skipping
-    ///         when the pool is already past the slippage bound.
-    address public immutable assetDebtPool;
     /// @notice Health factor below which `rebalance` will delever (sell yield
     ///         to repay debt). The position is over-levered below this bound.
     ///         WAD-scaled.
@@ -150,6 +146,30 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
 
     /// @dev Thrown when a slippage tolerance >= 100% (10_000 bps) is set.
     error InvalidSlippage();
+
+    /// @notice Adaptive per-call cap on the yield sold by the harvest leg, in yield-token
+    ///         units. Harvest is an optional, revert-corner leg: `harvestStep` either
+    ///         converts `amountIn` yield to collateral at an oracle-fair rate (bounded by
+    ///         `amountOutMinimum`) or reverts, so any cap value is safe (too high -> revert,
+    ///         too low -> slow). This value self-adjusts AIMD-style — grow by 1/8 on a
+    ///         capacity-bound success, halve on a revert — floored at `MIN_HARVEST`. The
+    ///         owner may reset it via `setHarvestCap` (jump-start after a throttle-down, or
+    ///         size it from observed pool depth). See `_harvestControl`.
+    uint256 public harvestCap;
+
+    /// @dev Floor for `harvestCap`; the multiplicative decrease can never drive it below this,
+    ///      so a run of reverts cannot brick the harvest at 0. The yield token (FUSDEV) is
+    ///      18 decimals, so `1e18` is ~1 whole FUSDEV (~$1) — a non-dust minimum chunk that a
+    ///      functional pool clears. FLAG: the magnitude (~$1 min chunk) is an assumption to
+    ///      confirm/tune against real pool depth; `setHarvestCap` sets the operating point
+    ///      above this floor.
+    uint256 internal constant MIN_HARVEST = 1e18;
+
+    /// @notice Emitted when the owner resets the adaptive harvest cap (old + new).
+    event HarvestCapSet(uint256 oldMax, uint256 newMax);
+
+    /// @dev Thrown when `harvestStep` is invoked by anyone other than the vault itself.
+    error OnlySelf();
 
     // ── Timelocked emergency recovery (custodial, in-kind) ──────────────────
     /// @notice Delay (in seconds) between scheduling and executing a recovery.
@@ -228,7 +248,6 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         uint24 feeYieldDebt;
         uint24 feeAssetDebt;
         address yieldDebtPool;
-        address assetDebtPool;
         uint256 healthFactorMin;
         uint256 healthFactorMax;
         uint256 healthFactorMinTarget;
@@ -305,14 +324,12 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         require(p.healthFactorMaxTarget <= p.healthFactorMax, "HF maxTarget > max");
         require(p.yieldFactorMax >= MarketLib.WAD, "yieldFactorMax < WAD");
         require(p.yieldDebtPool != address(0), "yieldDebtPool zero");
-        require(p.assetDebtPool != address(0), "assetDebtPool zero");
 
         loanToken = p.loanToken;
         yieldToken = p.yieldToken;
         feeYieldDebt = p.feeYieldDebt;
         feeAssetDebt = p.feeAssetDebt;
         yieldDebtPool = p.yieldDebtPool;
-        assetDebtPool = p.assetDebtPool;
         healthFactorMin = p.healthFactorMin;
         healthFactorMax = p.healthFactorMax;
         healthFactorMinTarget = p.healthFactorMinTarget;
@@ -338,6 +355,7 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
 
         recoveryDelay = p.recoveryDelay;
         maxSlippageBps = 100; // 1% default; admin retunes per pool depth.
+        harvestCap = MIN_HARVEST; // starts at the floor; grows AIMD-style, owner may jump-start via setHarvestCap.
 
         lastFeeAccrual = block.timestamp;
         // Seed the HWM at the starting price-per-share so the first deposit isn't counted as performance.
@@ -353,6 +371,19 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         if (newBps >= BPS) revert InvalidSlippage();
         emit MaxSlippageBpsSet(maxSlippageBps, newBps);
         maxSlippageBps = newBps;
+    }
+
+    /// @notice Reset the adaptive harvest cap `harvestCap` (yield-token units). Lets the
+    ///         owner jump-start it above the floor (e.g. size it from observed pool depth
+    ///         rather than waiting for AIMD to grow off `MIN_HARVEST`), or pull it down.
+    /// @dev    Clamped to `>= MIN_HARVEST` so the floor invariant holds. AIMD keeps adjusting
+    ///         from the new value; a wrong choice is safe (too high -> harvest reverts and
+    ///         halves back down, too low -> harvest is slower). No effect on the delever.
+    /// @param  newMax New cap; values below `MIN_HARVEST` are raised to it.
+    function setHarvestCap(uint256 newMax) external onlyOwner {
+        if (newMax < MIN_HARVEST) newMax = MIN_HARVEST;
+        emit HarvestCapSet(harvestCap, newMax);
+        harvestCap = newMax;
     }
 
     /// @dev Resolve the `sqrtPriceLimitX96` and a go/skip flag for a swap selling
@@ -425,13 +456,6 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         return tokenIn == address(yieldToken)
             ? _swapLimit(yieldDebtPool, tokenIn, address(loanToken), loanPerYield, MarketLib.ORACLE_PRICE_SCALE)
             : _swapLimit(yieldDebtPool, tokenIn, address(yieldToken), MarketLib.ORACLE_PRICE_SCALE, loanPerYield);
-    }
-
-    /// @dev Price limit for harvest leg 2's loan->collateral swap on the asset/debt
-    ///      pool. The market oracle quotes loan per collateral, 1e36-scaled.
-    function _assetDebtSwapLimit() internal view returns (uint160, bool) {
-        return
-            _swapLimit(assetDebtPool, address(loanToken), asset(), MarketLib.ORACLE_PRICE_SCALE, market.oraclePrice());
     }
 
     /// @notice Set the management fee rate (basis points), capped at `MAX_MANAGEMENT_FEE_BPS`.
@@ -835,8 +859,8 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
     /// @notice Drive the vault's leveraged Morpho position back inside the
     ///         `[healthFactorMin, healthFactorMax]` band and realize surplus yield above the
     ///         yield-factor band.
-    /// @dev    Two legs: `_harvest` (realize surplus) then `_adjustLeverage` (restore the
-    ///         band).
+    /// @dev    Two legs: `_harvestControl` (realize surplus, adaptively rate-limited) then
+    ///         `_adjustLeverage` (restore the band).
     function rebalance() external logsVaultState {
         // After a recovery the position is terminal; revert with an explicit
         // error so the off-chain rebalancer surfaces it and stops, rather than
@@ -845,7 +869,7 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         _accrueFees();
 
         // harvest must run before _adjustLeverage
-        _harvest();
+        _harvestControl();
         _adjustLeverage();
     }
 
@@ -1010,83 +1034,104 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         if (repaid > 0) market.repay(repaid);
     }
 
-    /// @dev Harvest leg of `rebalance` (internal; runs first). Realize surplus yield:
-    ///      sell the yield held above what the debt needs and supply the proceeds as
-    ///      collateral. NAV-neutral apart from swap costs. Add-only (no withdraw, no
-    ///      borrow) — it never increases leverage, so no flash loan is needed and it
-    ///      cannot push the position toward liquidation. No-op when the yield factor
-    ///      `rho = yieldValue / debt` is within the band (`rho <= yieldFactorMax` — before
-    ///      enough surplus accrues, or a yield depeg), or while a recovery is pending.
+    /// @dev Harvest controller (internal; runs first in `rebalance`). Realizes surplus yield
+    ///      into collateral, adaptively rate-limited. It does not delever (that is the delever
+    ///      leg's job) and does not leave the intermediate loan idle: `harvestStep` either
+    ///      converts its input to collateral at an oracle-fair rate or reverts as a whole
+    ///      (leg 2 consumes leg 1's full output).
     ///
-    ///      Both legs (yield->loan, then loan->collateral) swap under an oracle-derived
-    ///      `sqrtPriceLimitX96` (`maxSlippageBps` price-impact bound): each pool
-    ///      partial-fills up to its limit and the leg is skipped when the pool is
-    ///      already past it, so harvest never reverts the rebalance or blocks the
-    ///      delever leg. Any surplus the second leg does not convert to collateral is
-    ///      repaid as debt, capped at the debt outstanding -- loan token idles only in
-    ///      the extreme where the realized surplus exceeds the whole debt.
+    ///      Fires only when the yield factor `rho = yieldValue / debt` exceeds the band's upper
+    ///      edge (`yieldBalance > yieldForDebt * yieldFactorMax / WAD`), and is frozen while an
+    ///      emergency recovery is pending or executed. When it does not fire it is a pure
+    ///      no-op: `harvestCap` is left untouched — idle ticks must never perturb the adaptive
+    ///      state (that is what keeps the sampling event-driven, not cadence-driven).
     ///
-    ///      The two legs treat a partial fill differently. Leg 1's unsold surplus stays as
-    ///      yield and is retried next harvest; leg 2's is one-way -- loan it cannot convert
-    ///      is repaid as debt, so that round the surplus deleverages the position instead of
-    ///      growing collateral. That is value-preserving (a debt paydown, NAV ~flat); the
-    ///      vault is left underlevered until the health factor drifts above the band and the
-    ///      lever leg re-levers. Leg 2's throughput tracks asset/debt pool depth, which
-    ///      `maxTvl` bounds and which `redeemInKind` sidesteps entirely for exits.
-    function _harvest() internal {
+    ///      Sizing is AIMD (additive-increase / multiplicative-decrease — the TCP-congestion
+    ///      shape). It attempts `amountIn = min(surplus, harvestCap)`:
+    ///        - success, capacity-bound (`amountIn == harvestCap`): grow `harvestCap` by 1/8
+    ///          (probe for more depth). A surplus-bound success does NOT grow it — the cap was
+    ///          never exercised, so growing it would inflate an untested value.
+    ///        - revert (`harvestStep` could not clear the oracle-fair min-out — thin or
+    ///          mispriced pool): halve `harvestCap`, floored at `MIN_HARVEST`, and hold the
+    ///          surplus for a later call. The `try/catch` isolates the revert so a failed
+    ///          harvest never blocks the delever, and rolls back leg 1 so nothing is stranded.
+    ///      This adapts toward the pool's sustainable per-call throughput with no keeper input
+    ///      and no cross-pool depth read; the min-out bounds each attempt's realized rate, so a
+    ///      mis-sized `harvestCap` reverts rather than trading at a materially worse rate. It is
+    ///      well-behaved adaptive control in the spirit of AIMD (cf. RFC 5681's congestion-window
+    ///      floor) — a heuristic, not a formal convergence guarantee.
+    // slither-disable-next-line reentrancy-no-eth -> the self-call's post-return write only tunes the adaptive cap (a sizing hint, not value-bearing accounting)
+    function _harvestControl() internal {
         // Frozen while a recovery is pending or executed: don't reshape the position
         // (yield -> collateral) while it is being wound down.
         if (recoveryValidAt != 0 || recovered) return;
-        uint256 currentDebt = market.debt();
 
+        uint256 currentDebt = market.debt();
         uint256 yieldPrice = IOracle(yieldOracle).price();
         uint256 yieldBalance = yieldToken.balanceOf(address(this));
 
         // Yield needed to back the debt at oracle value; only the excess is harvestable
-        // surplus. Selling just the excess keeps the yield leg's oracle value >= debt, so
-        // the unwind invariant is unchanged.
-        uint256 yieldForDebt = currentDebt.mulDiv(MarketLib.ORACLE_PRICE_SCALE, yieldPrice);
-        // Fire only when the yield factor is above the band's upper edge: yieldBalance >
-        // yieldForDebt * yieldFactorMax / WAD (equivalently rho > yieldFactorMax). Then realize
-        // back down to yieldForDebt (rho = 1, bare backing).
+        // surplus. Selling just the excess keeps the yield leg's oracle value >= debt.
+        uint256 yieldForDebt = currentDebt.mulDiv(MarketLib.ORACLE_PRICE_SCALE, yieldPrice, Math.Rounding.Ceil);
+        // Fire only above the band's upper edge (rho > yieldFactorMax). Below it, no-op WITHOUT
+        // touching harvestCap — idle ticks must not perturb the adaptive state.
         if (yieldBalance <= yieldForDebt.mulDiv(yieldFactorMax, MarketLib.WAD)) return;
-        uint256 yieldToHarvest = yieldBalance - yieldForDebt;
 
-        uint256 loanBefore = loanToken.balanceOf(address(this));
+        uint256 surplus = yieldBalance - yieldForDebt;
+        uint256 amountIn = Math.min(surplus, harvestCap);
+        // slither-disable-next-line incorrect-equality -> exact-zero guard: nothing to sell
+        if (amountIn == 0) return; // harvestCap is floored > 0, so only reached if surplus == 0
 
-        // Leg 1: sell surplus yield -> loan on the yield/debt pool, bounded by an
-        // oracle-derived price limit (`maxSlippageBps` of price impact). The pool
-        // partial-fills up to the limit; when it is already past the bound the swap
-        // is skipped. Best-effort either way -- harvest never reverts the rebalance
-        // or blocks the delever leg. Same mechanism as `_rebalanceDelever`.
-        (uint160 limit, bool ok) = _yieldDebtSwapLimit(address(yieldToken));
-        if (!ok) return;
-        uint256 loanGot =
-            SwapLib.swapExactInToLimit(address(yieldToken), address(loanToken), feeYieldDebt, yieldToHarvest, limit);
-        // A dust surplus (or a pool already at the bound) rounds the swap output to
-        // zero; no-op rather than pass a zero amount to the next leg, which the router
-        // and Morpho reject.
-        // slither-disable-next-line incorrect-equality -> exact-zero guard: nothing realized, skip
-        if (loanGot == 0) return;
+        // Grow only when the attempt actually tested the cap; a surplus-bound attempt never
+        // exercised `harvestCap`, so a success there is no evidence the cap size clears.
+        // slither-disable-next-line incorrect-equality -> amountIn = min(surplus, harvestCap); exact equality is the intended "hit the cap" test, not a rounding-sensitive compare
+        bool capacityBound = amountIn == harvestCap;
 
-        // Leg 2: loan -> collateral on the asset/debt pool, bounded to the market oracle
-        // like leg 1 -- partial-fills up to the limit, skipped when already past the bound.
-        (uint160 assetLimit, bool assetOk) = _assetDebtSwapLimit();
-        uint256 collateralAdded =
-            assetOk ? SwapLib.swapExactInToLimit(address(loanToken), asset(), feeAssetDebt, loanGot, assetLimit) : 0;
-        // Supply as collateral only — no re-lever. This raises hf; `rebalance`'s lever
-        // branch redeploys the collateral if/when hf later drifts above the band.
-        if (collateralAdded > 0) market.supplyCollateral(collateralAdded);
+        // AIMD step. The self-call is the revert boundary: on a min-out miss the whole
+        // `harvestStep` reverts, rolling back leg 1 and letting the delever still run.
+        try this.harvestStep(amountIn) {
+            if (capacityBound) harvestCap += harvestCap / 8;
+        } catch {
+            uint256 halved = harvestCap / 2;
+            harvestCap = halved < MIN_HARVEST ? MIN_HARVEST : halved;
+        }
+    }
 
-        // Repay whatever leg 2 did not convert (a partial fill, or all of it when skipped),
-        // capped at the debt so it cannot over-repay; only a remainder beyond the whole
-        // debt is left idle as loan.
-        uint256 leftover = loanToken.balanceOf(address(this)) - loanBefore;
-        uint256 toRepay = Math.min(leftover, currentDebt);
-        // slither-disable-next-line unused-return -> repay amount is known (toRepay); Morpho reverts on failure
-        if (toRepay > 0) market.repay(toRepay);
+    /// @notice Harvest execution step: sell `amountIn` yield and supply the proceeds as
+    ///         collateral, or revert. Self-only — invoked exclusively by `_harvestControl`
+    ///         via `this.harvestStep(...)`, whose `try/catch` needs an external call boundary.
+    ///         That boundary is also what makes the harvest all-or-nothing: a min-out miss
+    ///         reverts the whole call, rolling back leg 1, so no intermediate loan is stranded.
+    /// @dev    Two single-hop legs. Leg 1 (`yield -> loan`) sells the full `amountIn`
+    ///         unbounded. Leg 2 (`loan -> collateral`) sells the full leg-1 output under an
+    ///         `amountOutMinimum` set to the oracle-fair `yield -> collateral` collateral for
+    ///         `amountIn`, discounted by `maxSlippageBps`. Because leg 2 consumes its entire
+    ///         input, no loan token is ever left idle; because the min-out spans both legs, it
+    ///         also bounds a sandwich on leg 1 (a bad leg-1 fill yields less collateral -> miss
+    ///         -> revert). `amountIn` is pre-sized by the controller; this function does not
+    ///         rate-limit.
+    /// @param  amountIn Yield token to sell this step (the controller's `min(surplus, cap)`).
+    function harvestStep(uint256 amountIn) external {
+        if (msg.sender != address(this)) revert OnlySelf();
 
-        emit Harvested(yieldToHarvest, collateralAdded);
+        uint256 yieldPrice = IOracle(yieldOracle).price(); // loan per yield, 1e36
+        uint256 collateralPrice = market.oraclePrice(); // loan per collateral, 1e36
+
+        // Minimum collateral out for the whole yield->loan->collateral round trip: the
+        // oracle-fair collateral for `amountIn` yield, discounted by the slippage tolerance.
+        // The 1e36 oracle scales cancel; rounds down (a conservative floor).
+        uint256 minCollateral = amountIn.mulDiv(yieldPrice, collateralPrice).mulDiv(BPS - maxSlippageBps, BPS);
+
+        // Leg 1: yield -> loan, unbounded. Protection is the end-to-end min-out on leg 2.
+        uint256 loanGot = SwapLib.swapExactIn(address(yieldToken), address(loanToken), feeYieldDebt, amountIn);
+
+        // Leg 2: loan -> collateral, full input, reverts below `minCollateral`. Consuming all
+        // of `loanGot` leaves no idle loan; a miss reverts the whole call (leg 1 rolled back).
+        uint256 collateralGot =
+            SwapLib.swapExactInMinOut(address(loanToken), asset(), feeAssetDebt, loanGot, minCollateral);
+
+        market.supplyCollateral(collateralGot);
+        emit Harvested(amountIn, collateralGot);
     }
 
     /// @notice Not implemented. Use `deposit` instead.

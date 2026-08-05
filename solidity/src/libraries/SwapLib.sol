@@ -88,6 +88,42 @@ library SwapLib {
         );
     }
 
+    /// @notice Swap the full `amountIn` of `tokenIn` for `tokenOut`, reverting in
+    ///         the router (`"Too little received"`) if the realized output is below
+    ///         `amountOutMinimum`. No price limit — the whole input is consumed or
+    ///         the swap reverts (all-or-nothing, never a partial fill).
+    /// @dev    Unlike `swapExactInToLimit` (marginal-price bound, best-effort partial
+    ///         fill), this bounds the *realized output* end-to-end. Used by the
+    ///         harvest's `loan->collateral` leg so the yield->loan->collateral round
+    ///         trip either clears an oracle-fair rate or reverts as a whole — leaving
+    ///         no intermediate token left idle. Recipient is always `address(this)`;
+    ///         caller MUST have approved `SWAP_ROUTER` for `tokenIn`.
+    /// @param  tokenIn           Token being sold.
+    /// @param  tokenOut          Token being bought.
+    /// @param  fee               Pool fee tier.
+    /// @param  amountIn          Amount of `tokenIn` to sell (fully consumed).
+    /// @param  amountOutMinimum  Minimum `tokenOut` to accept; router reverts below it.
+    /// @return amountOut         Realized amount of `tokenOut` received.
+    function swapExactInMinOut(
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint256 amountIn,
+        uint256 amountOutMinimum
+    ) internal returns (uint256 amountOut) {
+        return SWAP_ROUTER.exactInputSingle(
+            ISwapRouter.ExactInputSingleParams({
+                tokenIn: tokenIn,
+                tokenOut: tokenOut,
+                fee: fee,
+                recipient: address(this),
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                sqrtPriceLimitX96: 0
+            })
+        );
+    }
+
     /// @notice Swap `tokenIn` for exactly `amountOut` of `tokenOut`, reverting in
     ///         the router if it would cost more than `amountInMaximum`.
     /// @dev    Exact-output single-hop; recipient is always `address(this)`. Used

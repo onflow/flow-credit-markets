@@ -66,7 +66,6 @@ contract DeployVault is ConfiguredScript {
                 feeYieldDebt: c.feeYieldDebt,
                 feeAssetDebt: c.feeAssetDebt,
                 yieldDebtPool: c.yieldDebtPool,
-                assetDebtPool: c.assetDebtPool,
                 healthFactorMin: c.healthFactorMin,
                 healthFactorMax: c.healthFactorMax,
                 healthFactorMinTarget: c.healthFactorMinTarget,
