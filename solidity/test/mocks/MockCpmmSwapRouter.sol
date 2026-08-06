@@ -66,4 +66,49 @@ contract MockCpmmSwapRouter {
         MockERC20(p.tokenIn).burn(msg.sender, consumed);
         MockERC20(p.tokenOut).mint(p.recipient, amountOut);
     }
+
+    /// @dev Exact-output mirror of `exactInputSingle`, honoring `sqrtPriceLimitX96`
+    ///      the same way: if reaching the full `amountOut` would need more input
+    ///      than the price-limit bound allows, the fill stops there instead of
+    ///      reverting -- delivering less than `amountOut` on less input than the
+    ///      full amount would have needed. Reverts if the (possibly-limited)
+    ///      input still exceeds `amountInMaximum`, mirroring Uniswap's router.
+    function exactOutputSingle(ISwapRouter.ExactOutputSingleParams calldata p)
+        external
+        payable
+        returns (uint256 amountIn)
+    {
+        bool zeroForOne = p.tokenIn < p.tokenOut;
+        uint256 r0 = reserveOf[zeroForOne ? p.tokenIn : p.tokenOut];
+        uint256 r1 = reserveOf[zeroForOne ? p.tokenOut : p.tokenIn];
+        require(r0 > 0 && r1 > 0, "reserves unset");
+
+        uint256 reserveOut = zeroForOne ? r1 : r0;
+        require(p.amountOut < reserveOut, "insufficient liquidity");
+
+        // Input needed for the full requested amountOut, uncapped by the price limit.
+        amountIn = (r0 * r1) / (reserveOut - p.amountOut) - (zeroForOne ? r0 : r1);
+
+        // Cap at the amount that moves the marginal price to sqrtPriceLimitX96
+        // (0 = no limit), same bound as exactInputSingle.
+        if (p.sqrtPriceLimitX96 != 0) {
+            uint256 limitReserveIn = zeroForOne
+                ? Math.mulDiv(Math.sqrt(r0 * r1), Q96, p.sqrtPriceLimitX96)
+                : Math.mulDiv(Math.sqrt(r0 * r1), p.sqrtPriceLimitX96, Q96);
+            uint256 reserveIn = zeroForOne ? r0 : r1;
+            uint256 maxIn = limitReserveIn > reserveIn ? limitReserveIn - reserveIn : 0;
+            if (amountIn > maxIn) amountIn = maxIn;
+        }
+
+        require(amountIn <= p.amountInMaximum, "Too much requested");
+        if (amountIn == 0) return 0;
+
+        // Recompute the realized output from the (possibly limited) input -- a
+        // partial fill delivers less than the originally requested `amountOut`.
+        uint256 realizedOut =
+            zeroForOne ? r1 - Math.mulDiv(r0, r1, r0 + amountIn) : r0 - Math.mulDiv(r0, r1, r1 + amountIn);
+
+        MockERC20(p.tokenIn).burn(msg.sender, amountIn);
+        MockERC20(p.tokenOut).mint(p.recipient, realizedOut);
+    }
 }

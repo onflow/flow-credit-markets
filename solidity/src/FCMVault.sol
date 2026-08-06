@@ -959,26 +959,28 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
     }
 
     /// @dev Delever branch of `rebalance`: position is over-levered
-    ///      (`hf < healthFactorMin`). Sell yield token for loan token to repay
-    ///      enough debt to land the position back at `healthFactorMinTarget`.
+    ///      (`hf < healthFactorMin`). Buy exactly the loan token needed to repay
+    ///      enough debt to land the position back at `healthFactorMinTarget`,
+    ///      paying for it with yield token.
     ///
     ///      Sizing:
-    ///        targetDebt    = maxBorrow * WAD / healthFactorMinTarget
-    ///        repayAmount   = currentDebt - targetDebt
-    ///        yieldToSell   = repayAmount * 1e36 / yieldOraclePrice
+    ///        targetDebt  = maxBorrow * WAD / healthFactorMinTarget
+    ///        repayAmount = currentDebt - targetDebt
     ///
-    ///      `yieldToSell` is the oracle-implied yield amount whose loan-token
-    ///      value equals `repayAmount`. AMM slippage shows up as a small
-    ///      under-shoot (post-rebalance HF is slightly below
-    ///      `healthFactorMinTarget` if the swap realized less than oracle).
+    ///      `repayAmount` is requested directly as the swap's exact output, so
+    ///      the router determines the input at the live pool price -- no
+    ///      oracle-implied yield estimate to round or over/under-shoot. Spend is
+    ///      capped at the vault's own `yieldBalance` and at a `sqrtPriceLimitX96`
+    ///      derived from the oracle and `maxSlippageBps`.
     ///
-    ///      Partial: the yield->loan swap runs under a `sqrtPriceLimitX96`
-    ///      derived from the oracle and `maxSlippageBps`. If selling the full
-    ///      `yieldToSell` would push the pool past that price, the pool fills
-    ///      only up to it and the vault repays just the realized loan token, so
-    ///      the position lands partway to `healthFactorMinTarget` rather than
-    ///      reverting. When the pool is already priced past the bound the swap
-    ///      is skipped entirely (no-op).
+    ///      Partial: with a nonzero price limit, the router allows the output to
+    ///      fall short of `repayAmount` instead of reverting, so a too-large
+    ///      delever partial-fills and the position lands partway to
+    ///      `healthFactorMinTarget` rather than reverting. When the pool is
+    ///      already priced past the bound the swap is skipped entirely (no-op).
+    ///      Since the swap can only ever realize `<= repayAmount`, and
+    ///      `repayAmount <= currentDebt` by construction, `repaid` can never
+    ///      exceed `currentDebt` -- no residual loan token is left idle.
     ///
     /// @param maxBorrow   Current maximum-borrowable amount at LLTV (may be 0
     ///                    after a liquidation that wiped collateral).
@@ -990,27 +992,23 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         if (targetDebt >= currentDebt) return 0;
         uint256 repayAmount = currentDebt - targetDebt;
 
-        uint256 yieldPrice = IOracle(yieldOracle).price();
-        // Oracle-implied yield amount whose loan-token value equals
-        // `repayAmount` (not accounting for slippage)
-        uint256 yieldToSell = repayAmount.mulDiv(MarketLib.ORACLE_PRICE_SCALE, yieldPrice);
-
         uint256 yieldBalance = yieldToken.balanceOf(address(this));
-        if (yieldToSell > yieldBalance) yieldToSell = yieldBalance;
         // slither-disable-next-line incorrect-equality -> exact-zero guard: nothing to sell, so skip the swap
-        if (yieldToSell == 0) return 0;
+        if (yieldBalance == 0) return 0;
 
         (uint160 limit, bool ok) = _yieldDebtSwapLimit(address(yieldToken));
         if (!ok) return 0; // pool already past the slippage bound — no-op.
 
-        // Sell yield->loan bounded by the price limit. The pool partial-fills
-        // up to it, so a too-large delever still repays as much as the bound
-        // allows.
-        uint256 loanGot =
-            SwapLib.swapExactInToLimit(address(yieldToken), address(loanToken), feeYieldDebt, yieldToSell, limit);
-
-        // Cap repayment at outstanding debt
-        repaid = loanGot > currentDebt ? currentDebt : loanGot;
+        // Buy exactly `repayAmount` loan token, spending at most `yieldBalance`
+        // and never crossing the price limit. `exactOutputSingle` only returns
+        // the input spent, not the output realized, so measure the loan token
+        // actually received via balance delta.
+        uint256 loanBefore = loanToken.balanceOf(address(this));
+        // slither-disable-next-line unused-return -> loan received is measured from the balance delta below, not this return
+        SwapLib.swapExactOutToLimit(
+            address(yieldToken), address(loanToken), feeYieldDebt, repayAmount, yieldBalance, limit
+        );
+        repaid = loanToken.balanceOf(address(this)) - loanBefore;
         // slither-disable-next-line unused-return -> repay amount is known (repaid); Morpho reverts on failure
         if (repaid > 0) market.repay(repaid);
     }

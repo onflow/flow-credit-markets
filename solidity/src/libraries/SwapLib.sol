@@ -116,4 +116,43 @@ library SwapLib {
             })
         );
     }
+
+    /// @notice Buy up to `amountOut` of `tokenOut`, stopping early if the pool's
+    ///         marginal price reaches `sqrtPriceLimitX96`, and never spending more
+    ///         than `amountInMaximum` of `tokenIn`.
+    /// @dev    Uniswap's router only enforces `amountOutReceived == amountOut`
+    ///         when `sqrtPriceLimitX96 == 0`; with a nonzero limit it explicitly
+    ///         allows a partial fill (less output than requested) instead of
+    ///         reverting. `exactOutputSingle` only returns `amountIn`, never the
+    ///         realized output, so callers MUST measure `tokenOut` received via a
+    ///         balance delta -- do not assume `amountOut` was fully realized.
+    ///         Caller MUST have approved `SWAP_ROUTER` for `tokenIn`.
+    /// @param  tokenIn           Token being sold.
+    /// @param  tokenOut          Token being bought.
+    /// @param  fee               Pool fee tier.
+    /// @param  amountOut         Target amount of `tokenOut`; may be under-filled.
+    /// @param  amountInMaximum   Max `tokenIn` to spend; router reverts above it.
+    /// @param  sqrtPriceLimitX96 Q64.96 marginal-price bound the swap will not
+    ///                           cross; the fill stops here if reached.
+    /// @return amountIn          Realized `tokenIn` spent.
+    function swapExactOutToLimit(
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint256 amountOut,
+        uint256 amountInMaximum,
+        uint160 sqrtPriceLimitX96
+    ) internal returns (uint256 amountIn) {
+        return SWAP_ROUTER.exactOutputSingle(
+            ISwapRouter.ExactOutputSingleParams({
+                tokenIn: tokenIn,
+                tokenOut: tokenOut,
+                fee: fee,
+                recipient: address(this),
+                amountOut: amountOut,
+                amountInMaximum: amountInMaximum,
+                sqrtPriceLimitX96: sqrtPriceLimitX96
+            })
+        );
+    }
 }
