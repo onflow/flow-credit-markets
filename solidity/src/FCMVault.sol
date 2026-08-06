@@ -980,6 +980,11 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
     ///      reverting. When the pool is already priced past the bound the swap
     ///      is skipped entirely (no-op).
     ///
+    ///      Bounded residual: repayment is capped at `currentDebt`; any
+    ///      favorable-fill excess is left as an uncounted, sunk loan-token
+    ///      balance rather than swept or counted in NAV — see the inline note
+    ///      at the repay cap below.
+    ///
     /// @param maxBorrow   Current maximum-borrowable amount at LLTV (may be 0
     ///                    after a liquidation that wiped collateral).
     /// @param currentDebt Current outstanding debt.
@@ -1009,7 +1014,15 @@ contract FCMVault is ERC4626, AccessControl, Ownable2Step, IMorphoFlashLoanCallb
         uint256 loanGot =
             SwapLib.swapExactInToLimit(address(yieldToken), address(loanToken), feeYieldDebt, yieldToSell, limit);
 
-        // Cap repayment at outstanding debt
+        // Cap repayment at outstanding debt. Any favorable-fill excess (loanGot >
+        // currentDebt) is left as idle loan token, uncounted by totalAssets() (which
+        // reads tracked position state, not raw balances) -- a one-time, sunk NAV
+        // deflation borne pro-rata by holders, never recoverable except via
+        // executeEmergencyRecovery. Zero in normal operation; only reachable via a
+        // near-full delever under a yield-oracle mispricing large enough to over-size
+        // `yieldToSell` above -- that's a yield-oracle fidelity concern tracked
+        // separately, not a defect here. Sweeping/counting it instead would move this
+        // loss from a sunk medium into share accounting, which is the wrong direction.
         repaid = loanGot > currentDebt ? currentDebt : loanGot;
         // slither-disable-next-line unused-return -> repay amount is known (repaid); Morpho reverts on failure
         if (repaid > 0) market.repay(repaid);

@@ -256,6 +256,9 @@ See **TODO LINK TO REBALANCING SPEC**
 See [here](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/extensions/ERC4626.sol#L50-L68) for guidance on how to safely extend the base ERC4626 contract.
 
 ## Security
+### Loan-Token Accounting Boundary
+`totalAssets()` counts tracked, attributable position state — collateral, yield holdings, debt — not raw token balances. Anything the vault ends up holding outside that tracked state is deliberately left uncounted rather than recovered: counting or converting it would move that value into share-accounted state — the same surface a donation attack targets, increasing the attacker-profitable risk surface. The one place this currently applies: `_rebalanceDelever()` caps loan-token repayment at outstanding debt, and any favorable-fill excess beyond that is left as an idle loan-token balance rather than swept. Recovery in that case is limited to `executeEmergencyRecovery`, a deliberately separate, owner-gated path — not a normal accounting operation. Under faithful-oracle conditions the excess is bounded by the same `maxSlippageBps` tolerance already governing the swap's execution quality; it only reaches meaningfully larger scale if the yield oracle itself is mispriced, tracked separately.
+
 ### Donation/Inflation Attack
 See [explanation from OpenZeppelin](https://docs.openzeppelin.com/contracts/5.x/erc4626#security-concern-inflation-attack).
 
