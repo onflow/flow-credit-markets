@@ -159,7 +159,8 @@ case "${1:-}" in
 
   solhint)
     out="$REPORTS/solhint-report-$(stamp).txt"
-    static_run bash -c 'cd solidity && solhint "src/**/*.sol"' 2>&1 | tee "$out"
+    static_run bash -c 'cd solidity && solhint "src/**/*.sol" "!src/interfaces/external/**"' 2>&1 | tee "$out"
+
     echo ">> Saved: $out"
     ;;
 

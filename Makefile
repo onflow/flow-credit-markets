@@ -1,13 +1,17 @@
 .PHONY: ci
-ci: solidity-fmt solidity-build solidity-test cadence-test
+ci: solidity-fmt solidity-lint solidity-snapshot solidity-build solidity-test cadence-test
 
 .PHONY: solidity-fmt
 solidity-fmt:
-	cd solidity && forge fmt --check
+	cd solidity && FOUNDRY_PROFILE=ci forge fmt --check
 
-.PHONY: solidity-fmt-fix
-solidity-fmt-fix:
-	cd solidity && forge fmt
+.PHONY: solidity-lint
+solidity-lint:
+	cd solidity && FOUNDRY_PROFILE=ci forge lint
+
+.PHONY: solidity-snapshot
+solidity-lint:
+	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --check
 
 .PHONY: solidity-build
 solidity-build:
@@ -15,11 +19,16 @@ solidity-build:
 
 .PHONY: solidity-test
 solidity-test:
-	cd solidity && FOUNDRY_PROFILE=ci forge test -vvv
+	cd solidity && FOUNDRY_PROFILE=ci forge test
 
 .PHONY: cadence-test
 cadence-test:
 	flow test
+
+.PHONY: solidity-fmt-fix
+solidity-fmt-fix:
+	cd solidity && forge fmt
+
 
 # ---------------------------------------------------------------------------
 # Pyth oracle maintenance (Flow EVM mainnet — MANUAL ONLY)
