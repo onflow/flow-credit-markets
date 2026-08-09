@@ -153,13 +153,14 @@ case "${1:-}" in
 
   aderyn)
     out="$REPORTS/aderyn-report-$(stamp).md"
-    static_run bash -c "aderyn solidity -x interfaces/external && cat report.md" 2>&1 | tee "$out"
+    static_run bash -c "aderyn solidity && cat report.md" 2>&1 | tee "$out"
     echo ">> Saved: $out"
     ;;
 
   solhint)
     out="$REPORTS/solhint-report-$(stamp).txt"
-    static_run bash -c 'cd solidity && solhint "src/**/*.sol" "!src/interfaces/external/**"' 2>&1 | tee "$out"
+    static_run bash -c 'cd solidity && solhint "src/**/*.sol" "!src/interfaces/external/**" --max-warnings 0' 2>&1 | tee "$out"
+
 
     echo ">> Saved: $out"
     ;;

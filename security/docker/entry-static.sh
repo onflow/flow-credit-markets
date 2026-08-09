@@ -6,6 +6,6 @@
 
 set -euo pipefail
 
-cp -a /repo/. /work/
+cp -a --no-preserve=ownership /repo/. /work/
 cd /work
 exec "$@"

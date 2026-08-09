@@ -287,10 +287,10 @@ security-set-token:
 security-check-cred:
 	./security/scan.sh check-cred
 
-# Reproduce the CI merge gate locally: exactly Slither + Solhint (no Aderyn, no
+# Reproduce the CI merge gate locally: exactly Slither + Solhint + Aderyn ( no
 # AI tier), same tools/versions/config as .github/workflows/security-static.yml.
 .PHONY: security-ci
-security-ci: security-slither security-solhint
+security-ci: security-slither security-solhint security-aderyn
 
 # Run all non-AI static analyzers locally (sealed, no network). Superset of the
 # CI gate — adds Aderyn as an advisory (non-gating) check.
