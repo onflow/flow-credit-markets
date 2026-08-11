@@ -10,7 +10,7 @@ solidity-lint:
 	cd solidity && FOUNDRY_PROFILE=ci forge lint
 
 .PHONY: solidity-snapshot
-solidity-lint:
+solidity-snapshot:
 	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --check
 
 .PHONY: solidity-build
