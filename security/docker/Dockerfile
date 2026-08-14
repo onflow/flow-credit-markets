@@ -10,8 +10,8 @@
 FROM node:24-bookworm-slim
 
 # Pinned tool versions ------------------------------------------------------
-ARG SLITHER_VERSION=0.11.5
-ARG SOLHINT_VERSION=6.2.1
+ARG SLITHER_VERSION=0.11.6
+ARG SOLHINT_VERSION=6.2.3
 ARG ADERYN_VERSION=0.6.8
 ARG CLAUDE_VERSION=2.1.146
 ARG SOLC_VERSION=0.8.35

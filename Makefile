@@ -1,13 +1,17 @@
 .PHONY: ci
-ci: solidity-fmt solidity-build solidity-test cadence-test
+ci: solidity-fmt solidity-lint solidity-snapshot solidity-build solidity-test cadence-test
 
 .PHONY: solidity-fmt
 solidity-fmt:
-	cd solidity && forge fmt --check
+	cd solidity && FOUNDRY_PROFILE=ci forge fmt --check
 
-.PHONY: solidity-fmt-fix
-solidity-fmt-fix:
-	cd solidity && forge fmt
+.PHONY: solidity-lint
+solidity-lint:
+	cd solidity && FOUNDRY_PROFILE=ci forge lint
+
+.PHONY: solidity-snapshot
+solidity-snapshot:
+	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --check
 
 .PHONY: solidity-build
 solidity-build:
@@ -15,11 +19,16 @@ solidity-build:
 
 .PHONY: solidity-test
 solidity-test:
-	cd solidity && FOUNDRY_PROFILE=ci forge test -vvv
+	cd solidity && FOUNDRY_PROFILE=ci forge test
 
 .PHONY: cadence-test
 cadence-test:
 	flow test
+
+.PHONY: solidity-fmt-fix
+solidity-fmt-fix:
+	cd solidity && forge fmt
+
 
 # ---------------------------------------------------------------------------
 # Pyth oracle maintenance (Flow EVM mainnet — MANUAL ONLY)
@@ -278,10 +287,10 @@ security-set-token:
 security-check-cred:
 	./security/scan.sh check-cred
 
-# Reproduce the CI merge gate locally: exactly Slither + Solhint (no Aderyn, no
+# Reproduce the CI merge gate locally: exactly Slither + Solhint + Aderyn ( no
 # AI tier), same tools/versions/config as .github/workflows/security-static.yml.
 .PHONY: security-ci
-security-ci: security-slither security-solhint
+security-ci: security-slither security-solhint security-aderyn
 
 # Run all non-AI static analyzers locally (sealed, no network). Superset of the
 # CI gate — adds Aderyn as an advisory (non-gating) check.
