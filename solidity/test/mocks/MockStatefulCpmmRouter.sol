@@ -3,7 +3,7 @@ pragma solidity ^0.8.19;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import {ISwapRouter} from "../../src/interfaces/ISwapRouter.sol";
+import {ISwapRouter02} from "../../src/interfaces/external/ISwapRouter02.sol";
 import {MockERC20} from "./MockERC20.sol";
 
 /// @dev STATEFUL constant-product (x*y=k) router: unlike MockCpmmSwapRouter, reserves ARE
@@ -28,11 +28,11 @@ contract MockStatefulCpmmRouter {
     /// @notice Seed a pool. `rA`/`rB` are reserves for `tokenA`/`tokenB` respectively.
     function setPool(address tokenA, uint256 rA, address tokenB, uint256 rB) external {
         bytes32 k = _key(tokenA, tokenB);
-        if (tokenA < tokenB) pools[k] = Pool(rA, rB);
-        else pools[k] = Pool(rB, rA);
+        if (tokenA < tokenB) pools[k] = Pool({r0: rA, r1: rB});
+        else pools[k] = Pool({r0: rB, r1: rA});
     }
 
-    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata p)
+    function exactInputSingle(ISwapRouter02.ExactInputSingleParams calldata p)
         external
         payable
         returns (uint256 amountOut)
@@ -57,7 +57,7 @@ contract MockStatefulCpmmRouter {
         MockERC20(p.tokenOut).mint(p.recipient, amountOut);
     }
 
-    function exactOutputSingle(ISwapRouter.ExactOutputSingleParams calldata p)
+    function exactOutputSingle(ISwapRouter02.ExactOutputSingleParams calldata p)
         external
         payable
         returns (uint256 amountIn)

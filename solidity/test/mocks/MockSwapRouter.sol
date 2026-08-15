@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.19;
 
-import {ISwapRouter} from "../../src/interfaces/ISwapRouter.sol";
+import {ISwapRouter02} from "../../src/interfaces/external/ISwapRouter02.sol";
 import {MockERC20} from "./MockERC20.sol";
 
 /// @dev Rate-based swap mock. Each ordered token pair carries a WAD-scaled rate
@@ -45,7 +45,7 @@ contract MockSwapRouter {
         if (r == 0) r = WAD;
     }
 
-    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata p)
+    function exactInputSingle(ISwapRouter02.ExactInputSingleParams calldata p)
         external
         payable
         returns (uint256 amountOut)
@@ -61,7 +61,7 @@ contract MockSwapRouter {
     /// @dev Exact-output mirror of `exactInputSingle`: grosses the input up by the
     ///      fee and inverts the rate to deliver exactly `amountOut`, reverting if it
     ///      exceeds `amountInMaximum`. Ignores fee tier and price-limit fields.
-    function exactOutputSingle(ISwapRouter.ExactOutputSingleParams calldata p)
+    function exactOutputSingle(ISwapRouter02.ExactOutputSingleParams calldata p)
         external
         payable
         returns (uint256 amountIn)

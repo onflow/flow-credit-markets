@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
+import {ISwapRouter02} from "../src/interfaces/external/ISwapRouter02.sol";
 import {SwapLib} from "../src/libraries/SwapLib.sol";
-import {ISwapRouter} from "../src/interfaces/ISwapRouter.sol";
 
 import {StalePriceArbBase} from "./StalePriceArbBase.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockStatefulCpmmRouter} from "./mocks/MockStatefulCpmmRouter.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 /// @title Manufactured Py-divergence via the unfloored deposit/redeem legs
 /// @notice The attacker *creates* a Py_oracle-vs-Py_dex divergence by trading the yield pool (rather
@@ -20,6 +21,7 @@ import {MockStatefulCpmmRouter} from "./mocks/MockStatefulCpmmRouter.sol";
 ///         The stateful CPMM mock moves on trades, so manipulation carries real, depth-dependent cost.
 ///         Full treatment: docs/oracle-mispricing-extraction.md §3.
 contract StalePriceArbManipulationTest is StalePriceArbBase {
+    using SafeCast for uint256;
     // Larger than the sister suite's cap (1e24): the self-extraction size sweep needs the deposit
     // legs to be flow-bounded here, not TVL-capped, so the manufacturing cost is what dominates.
     uint256 internal constant MAX_TVL = 1e27;
@@ -45,7 +47,7 @@ contract StalePriceArbManipulationTest is StalePriceArbBase {
     function _swap(address who, address tin, address tout, uint256 amtIn) internal {
         vm.prank(who);
         router.exactInputSingle(
-            ISwapRouter.ExactInputSingleParams({
+            ISwapRouter02.ExactInputSingleParams({
                 tokenIn: tin,
                 tokenOut: tout,
                 fee: 0,
@@ -85,7 +87,7 @@ contract StalePriceArbManipulationTest is StalePriceArbBase {
         vault.redeem(sh, attacker, attacker);
         vm.stopPrank();
 
-        pnl = int256(_valueP(attacker)) - int256(v0);
+        pnl = SafeCast.toInt256(_valueP(attacker)) - SafeCast.toInt256(v0);
         vm.revertToState(snap);
     }
 

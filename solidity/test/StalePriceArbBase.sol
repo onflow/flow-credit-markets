@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import {Test} from "forge-std/Test.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {FCMVault, MORPHO} from "../src/FCMVault.sol";
-import {SwapLib} from "../src/libraries/SwapLib.sol";
+import {FCMVault} from "../src/FCMVault.sol";
+import {IFCMVault} from "../src/interfaces/IFCMVault.sol";
+import {MarketLib} from "../src/libraries/MarketLib.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
-import {MockMorpho} from "./mocks/MockMorpho.sol";
-import {MockUniswapV3Pool} from "./mocks/MockUniswapV3Pool.sol";
-import {MockOracle} from "./mocks/MockOracle.sol";
 import {MockIrm} from "./mocks/MockIrm.sol";
+import {MockMorpho} from "./mocks/MockMorpho.sol";
+import {MockOracle} from "./mocks/MockOracle.sol";
+import {MockUniswapV3Pool} from "./mocks/MockUniswapV3Pool.sol";
+import {IOracle} from "@morpho-blue/interfaces/IOracle.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Test} from "forge-std/Test.sol";
 
 abstract contract StalePriceArbBase is Test {
     IERC20 constant WETH = IERC20(0x2F6F07CDcf3588944Bf4C42aC74ff24bF56e7590);
@@ -44,7 +46,7 @@ abstract contract StalePriceArbBase is Test {
         vm.etch(address(WETH), erc20Code);
         vm.etch(address(PYUSD0), erc20Code);
         vm.etch(address(FUSDEV), erc20Code);
-        vm.etch(address(MORPHO), address(new MockMorpho()).code);
+        vm.etch(address(MarketLib.MORPHO), address(new MockMorpho()).code);
         vm.etch(MOCK_IRM, address(new MockIrm()).code);
     }
 
@@ -54,7 +56,7 @@ abstract contract StalePriceArbBase is Test {
         yieldOracle = new MockOracle(YIELD_PRICE);
         yieldPool = new MockUniswapV3Pool();
         vault = new FCMVault(
-            FCMVault.InitParams({
+            IFCMVault.InitParams({
                 collateral: WETH,
                 loanToken: PYUSD0,
                 yieldToken: FUSDEV,
@@ -70,7 +72,7 @@ abstract contract StalePriceArbBase is Test {
                 healthFactorMinTarget: HF_MIN_TARGET,
                 healthFactorMaxTarget: HF_MAX_TARGET,
                 yieldFactorMax: YIELD_FACTOR_MAX,
-                yieldOracle: address(yieldOracle),
+                yieldOracle: IOracle(address(yieldOracle)),
                 admin: admin,
                 recoveryDelay: 7 days,
                 name: "Flow Credit Markets WETH",
@@ -79,8 +81,8 @@ abstract contract StalePriceArbBase is Test {
         );
         vm.startPrank(admin);
         vault.setMaxTvl(maxTvl);
-        vault.grantRole(vault.EARLY_ACCESS_ROLE(), honest);
-        vault.grantRole(vault.EARLY_ACCESS_ROLE(), attacker);
+        vault.grantEarlyAccess(honest);
+        vault.grantEarlyAccess(attacker);
         vm.stopPrank();
     }
 
