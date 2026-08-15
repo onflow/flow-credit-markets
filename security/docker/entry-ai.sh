@@ -22,7 +22,7 @@ export DISABLE_TELEMETRY=1
 export DISABLE_ERROR_REPORTING=1
 export DISABLE_BUG_COMMAND=1
 
-cp -a /repo/. /work/
+cp -a --no-preserve=ownership /repo/. /work/
 cd /work
 
 # Heads-up on stderr (not stdout, so it stays out of the saved report). Claude in

@@ -152,14 +152,16 @@ case "${1:-}" in
     ;;
 
   aderyn)
-    name="aderyn-report-$(stamp).md"
-    static_run bash -c "aderyn solidity -o /out/$name"
-    echo ">> Saved: security/reports/$name"
+    out="$REPORTS/aderyn-report-$(stamp).md"
+    static_run bash -c "aderyn solidity && cat report.md" 2>&1 | tee "$out"
+    echo ">> Saved: $out"
     ;;
 
   solhint)
     out="$REPORTS/solhint-report-$(stamp).txt"
-    static_run bash -c 'cd solidity && solhint "src/**/*.sol"' 2>&1 | tee "$out"
+    static_run bash -c 'cd solidity && solhint "src/**/*.sol" "!src/interfaces/external/**" --max-warnings 0' 2>&1 | tee "$out"
+
+
     echo ">> Saved: $out"
     ;;
 
