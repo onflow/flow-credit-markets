@@ -10,3 +10,6 @@
 [submodule "solidity/lib/Yearn-ERC4626-Router"]
 	path = solidity/lib/Yearn-ERC4626-Router
 	url = https://github.com/yearn/Yearn-ERC4626-Router
+[submodule "solidity/lib/pyth-sdk-solidity"]
+	path = solidity/lib/pyth-sdk-solidity
+	url = https://github.com/pyth-network/pyth-sdk-solidity
