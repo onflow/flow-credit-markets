@@ -147,7 +147,7 @@ case "${1:-}" in
     # on the line above the flagged statement (detector id = the name printed
     # in the report, e.g. unused-return).
     out="$REPORTS/slither-report-$(stamp).txt"
-    static_run bash -c 'cd solidity && slither . --config-file slither.config.json --fail-medium' 2>&1 | tee "$out"
+    static_run bash -c 'cd solidity && slither . --config-file slither.config.json' 2>&1 | tee "$out"
     echo ">> Saved: $out"
     ;;
 
@@ -159,7 +159,7 @@ case "${1:-}" in
 
   solhint)
     out="$REPORTS/solhint-report-$(stamp).txt"
-    static_run bash -c 'cd solidity && solhint "src/**/*.sol" "!src/interfaces/external/**" --max-warnings 0' 2>&1 | tee "$out"
+    static_run bash -c 'cd solidity && solhint "./**/*.sol" "!src/interfaces/external/**" --max-warnings 0' 2>&1 | tee "$out"
 
 
     echo ">> Saved: $out"

@@ -8,4 +8,5 @@ set -euo pipefail
 
 cp -a --no-preserve=ownership /repo/. /work/
 cd /work
+forge build
 exec "$@"
