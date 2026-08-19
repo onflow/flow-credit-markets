@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.25;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {Id, Market, MarketParams, Position} from "@morpho-blue/interfaces/IMorpho.sol";
 import {IMorphoFlashLoanCallback} from "@morpho-blue/interfaces/IMorphoCallbacks.sol";
+import {IOracle} from "@morpho-blue/interfaces/IOracle.sol";
 import {MarketParamsLib} from "@morpho-blue/libraries/MarketParamsLib.sol";
 
 import {MockERC20} from "./MockERC20.sol";
@@ -23,6 +24,16 @@ contract MockMorpho {
 
     uint256 internal constant VIRTUAL_SHARES = 1e6;
     uint256 internal constant VIRTUAL_ASSETS = 1;
+
+    /// @dev Off by default (existing tests rely on the lenient behavior). When on,
+    ///      `withdrawCollateral` enforces Morpho's post-state health-factor ≥ 1 check,
+    ///      so tests can exercise the underwater / past-δ-cap regime where real Morpho
+    ///      would revert a pro-rata (Case-A) redeem.
+    bool public enforceHf;
+
+    function setEnforceHf(bool on) external {
+        enforceHf = on;
+    }
 
     function accrueInterest(MarketParams memory mp) external {
         market[mp.id()].lastUpdate = uint128(block.timestamp);
@@ -119,6 +130,24 @@ contract MockMorpho {
         Id id = mp.id();
         position[id][onBehalf].collateral -= SafeCast.toUint128(assets);
         IERC20(mp.collateralToken).safeTransfer(receiver, assets);
+        if (enforceHf) {
+            // Morpho: healthy iff debt <= collateral * price / ORACLE_SCALE * LLTV / WAD.
+            uint256 pc = IOracle(mp.oracle).price();
+            uint256 maxBorrow = position[id][onBehalf].collateral * pc / 1e36 * mp.lltv / 1e18;
+            require(_debtOf(id, onBehalf) <= maxBorrow, "insufficient collateral");
+        }
+        position[id][onBehalf].collateral -= SafeCast.toUint128(assets);
+        IERC20(mp.collateralToken).safeTransfer(receiver, assets);
+    }
+
+    function _debtOf(Id id, address who) internal view returns (uint256) {
+        Market storage m = market[id];
+        uint256 shares = position[id][who].borrowShares;
+        if (shares == 0) return 0;
+        return
+            _mulDivUp(
+                shares, uint256(m.totalBorrowAssets) + VIRTUAL_ASSETS, uint256(m.totalBorrowShares) + VIRTUAL_SHARES
+            );
     }
 
     /// @notice Test-only hook that simulates a liquidation against `borrower`:
