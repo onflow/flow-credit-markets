@@ -29,6 +29,9 @@ cadence-test:
 solidity-fmt-fix:
 	cd solidity && forge fmt
 
+.PHONY:
+snapshot:
+	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --match-path test/gas/*.sol
 
 # ---------------------------------------------------------------------------
 # Pyth oracle maintenance (Flow EVM mainnet — MANUAL ONLY)
