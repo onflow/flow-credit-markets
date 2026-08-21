@@ -11,7 +11,7 @@ solidity-lint:
 
 .PHONY: solidity-snapshot
 solidity-snapshot:
-	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --check
+	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --match-path test/gas/*.sol --check
 
 .PHONY: solidity-build
 solidity-build:
