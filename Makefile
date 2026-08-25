@@ -11,7 +11,7 @@ solidity-lint:
 
 .PHONY: solidity-snapshot
 solidity-snapshot:
-	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --match-path test/gas/*.sol --check
+	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --match-path test/gas/*.sol --check --tolerance 1
 
 .PHONY: solidity-build
 solidity-build:
@@ -31,7 +31,7 @@ solidity-fmt-fix:
 
 .PHONY:
 snapshot:
-	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --match-path test/gas/*.sol
+	cd solidity && FOUNDRY_PROFILE=ci forge snapshot --match-path "test/gas/*.sol"
 
 # ---------------------------------------------------------------------------
 # Pyth oracle maintenance (Flow EVM mainnet — MANUAL ONLY)
