@@ -30,7 +30,7 @@ library MorphoLib {
     }
 
     /// @notice Returns `user`'s current debt in the given Morpho market, denominated in raw loan-token units.
-    function debt(IMorpho morpho, MarketParams memory market, address user) internal view returns (uint256) {
+    function debt(IMorpho morpho, MarketParams memory market, address user) external view returns (uint256) {
         uint256 borrowShares_ = borrowShares(morpho, market, user);
         if (borrowShares_ == 0) return 0;
         Market memory mkt = morpho.market(market.id());
