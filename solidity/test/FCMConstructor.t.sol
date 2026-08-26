@@ -7,8 +7,8 @@ import "../src/libraries/ConstantsLib.sol";
 import {FCMHelpers} from "../src/libraries/periphery/FCMHelpers.sol";
 import {Deployers} from "./utils/Deployers.sol";
 import {Errors} from "./utils/Errors.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Test} from "forge-std/Test.sol";
-import {Math} from "openzeppelin-contracts/contracts/utils/math/Math.sol";
 
 contract FCMConstructorTest is Test, Deployers {
     using FCMHelpers for FCMVault;

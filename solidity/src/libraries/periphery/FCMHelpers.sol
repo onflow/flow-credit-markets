@@ -6,7 +6,7 @@ import "../ConstantsLib.sol";
 import {MorphoLib} from "../MorphoLib.sol";
 import {IMorpho, MarketParams, Position} from "@morpho-blue/interfaces/IMorpho.sol";
 import {MarketParamsLib} from "@morpho-blue/libraries/MarketParamsLib.sol";
-import {Math} from "openzeppelin-contracts/contracts/utils/math/Math.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title FCMHelpers
 /// @author Flow Foundation
