@@ -333,3 +333,9 @@ security-ai-skills:
 .PHONY: security-ai-summarize
 security-ai-summarize:
 	./security/scan.sh summarize
+
+.PHONY: coverage
+coverage:
+	(cd solidity && forge coverage --report lcov --report summary)
+	(cd solidity && genhtml lcov.info -o coverage --branch-coverage --ignore-errors inconsistent --ignore-errors corrupt)
+	open solidity/coverage/index.html
